@@ -1,0 +1,6 @@
+/target
+.agent/runs/
+.agent/patches/
+.agent/logs/
+.env
+.env.*
