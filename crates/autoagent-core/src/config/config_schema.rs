@@ -14,6 +14,21 @@ pub struct AutoAgentConfig {
     pub logging: LoggingConfig,
     pub patches: PatchesConfig,
     pub runs: RunsConfig,
+    /// Optional LLM provider config (M3+). Absent in M1/M2 configs.
+    #[serde(default)]
+    pub llm: Option<LlmConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmConfig {
+    /// "local" | "anthropic" | "openai"
+    pub provider: String,
+    pub model: String,
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    /// Source code is only sent to a cloud provider when this is true.
+    #[serde(default)]
+    pub code_egress_opt_in: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
