@@ -33,6 +33,8 @@ enum Command {
     Init,
     /// Check local system, config, commands, and workspace health.
     Doctor,
+    /// Analyze the current project and write a project report.
+    Analyze,
     /// Apply a structured plan through the policy-controlled mutation engine.
     Apply { plan: PathBuf },
     /// Revert a previous AutoAgent run.
@@ -96,6 +98,12 @@ fn run(cli: Cli) -> Result<()> {
                     "one or more health checks failed".into(),
                 ));
             }
+        }
+        Command::Analyze => {
+            let config = autoagent_core::config::config_schema::AutoAgentConfig::load(&root)?;
+            let analysis = autoagent_core::analysis::project_analyzer::analyze(&root, &config)?;
+            let path = autoagent_core::analysis::report_writer::write_report(&root, &analysis)?;
+            println!("wrote {path}");
         }
         Command::Apply { plan } => {
             let plan_path = to_utf8(plan)?;
