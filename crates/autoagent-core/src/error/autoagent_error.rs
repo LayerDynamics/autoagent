@@ -27,6 +27,8 @@ pub enum AutoAgentError {
     Revert(String),
     #[error("memory error: {0}")]
     Memory(String),
+    #[error("llm provider error: {0}")]
+    Llm(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("serialization error: {0}")]
@@ -64,7 +66,10 @@ impl AutoAgentError {
             AutoAgentError::Validation(_) => 6,
             AutoAgentError::Revert(_) => 7,
             AutoAgentError::Memory(_) => 8,
-            AutoAgentError::Io(_) | AutoAgentError::Serde(_) | AutoAgentError::Analysis(_) => 1,
+            AutoAgentError::Llm(_)
+            | AutoAgentError::Io(_)
+            | AutoAgentError::Serde(_)
+            | AutoAgentError::Analysis(_) => 1,
         }
     }
 
@@ -80,6 +85,7 @@ impl AutoAgentError {
             AutoAgentError::Validation(_) => "validation".into(),
             AutoAgentError::Revert(_) => "revert".into(),
             AutoAgentError::Memory(_) => "memory".into(),
+            AutoAgentError::Llm(_) => "llm".into(),
             AutoAgentError::Io(_) => "io".into(),
             AutoAgentError::Serde(_) => "serde".into(),
         }
