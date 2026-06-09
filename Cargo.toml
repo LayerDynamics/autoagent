@@ -4,6 +4,7 @@ members = [
     "crates/autoagent-core",
     "crates/autoagent-cli",
     "crates/autoagent-plugin-sdk",
+    "crates/autoagent-bingen",
 ]
 
 [workspace.package]
