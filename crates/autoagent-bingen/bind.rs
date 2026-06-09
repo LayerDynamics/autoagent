@@ -117,6 +117,82 @@ pub fn analyze(root: &str) -> BindResult {
     serde_json::to_string(&analysis).map_err(serde_err)
 }
 
+/// Initialize `Autoagent.toml` + the `.agent/` tree; returns `"true"` if files
+/// were written, `"false"` if an existing config was preserved.
+pub fn init(root: &str) -> BindResult {
+    let wrote = autoagent_core::runtime::init::init_workspace(utf8(root)?)?;
+    Ok(wrote.to_string())
+}
+
+/// Render the effective `Autoagent.toml`.
+pub fn config_show(root: &str) -> BindResult {
+    let cfg = autoagent_core::config::config_schema::AutoAgentConfig::load(utf8(root)?)?;
+    toml::to_string_pretty(&cfg).map_err(|e| BindError {
+        code: "config".into(),
+        exit_code: 2,
+        message: e.to_string(),
+    })
+}
+
+/// List patch artifact run ids (files under `.agent/patches/*.patch`) as a JSON
+/// array. Mirrors `commands::patch_list` but returns data instead of printing.
+pub fn patch_list(root: &str) -> BindResult {
+    let dir = utf8(root)?.join(".agent/patches");
+    let mut names: Vec<String> = match std::fs::read_dir(dir.as_std_path()) {
+        Ok(rd) => rd
+            .filter_map(|e| e.ok())
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|n| n.ends_with(".patch"))
+            .map(|n| n.trim_end_matches(".patch").to_string())
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    names.sort();
+    serde_json::to_string(&names).map_err(serde_err)
+}
+
+/// Show a patch body for a run id. Mirrors `commands::patch_show`.
+pub fn patch_show(root: &str, run_id: &str) -> BindResult {
+    let path = utf8(root)?
+        .join(".agent/patches")
+        .join(format!("{run_id}.patch"));
+    std::fs::read_to_string(path.as_std_path()).map_err(|_| BindError {
+        code: "revert".into(),
+        exit_code: 7,
+        message: format!("no patch for run {run_id}"),
+    })
+}
+
+/// Project memory summary (name, language, package manager, file count, decision
+/// count) as a JSON object. Mirrors the data `commands::memory_show` prints.
+pub fn memory_show(root: &str) -> BindResult {
+    let root = utf8(root)?;
+    let cfg = autoagent_core::config::config_schema::AutoAgentConfig::load(root)?;
+    let store = autoagent_core::memory::memory_store::MemoryStore::new(
+        root.join(&cfg.memory.directory),
+    );
+    let pm = store.load_project()?;
+    let decisions = store.load_decisions()?;
+    let summary = serde_json::json!({
+        "name": pm.name,
+        "language": pm.language,
+        "package_manager": pm.package_manager,
+        "source_file_count": pm.source_file_count,
+        "decisions": decisions.len(),
+    });
+    Ok(summary.to_string())
+}
+
+/// List registered plugin tools (builtins + discovered WASM plugins) as a JSON
+/// array. Mirrors `commands::tools_list`.
+pub fn tools_list(root: &str) -> BindResult {
+    let mut names = autoagent_core::plugins::with_builtins()?.tool_names();
+    for m in autoagent_core::plugins::discover_wasm_plugins(utf8(root)?) {
+        names.push(m.name);
+    }
+    serde_json::to_string(&names).map_err(serde_err)
+}
+
 /// The single source of truth for the bound surface (full CLI parity, FR-4).
 /// Every backend adapter and stub is generated from this table.
 pub static SURFACE: &[Symbol] = &[

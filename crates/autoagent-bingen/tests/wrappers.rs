@@ -25,3 +25,37 @@ fn error_payload_carries_code_and_exit() {
     assert!(!err.code.is_empty());
     assert!(err.exit_code >= 1);
 }
+
+#[test]
+fn config_show_renders_toml_after_init() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_str().unwrap();
+    bind::init(root).unwrap(); // writes Autoagent.toml
+    let toml = bind::config_show(root).unwrap();
+    assert!(toml.contains("[agent]"));
+}
+
+#[test]
+fn patch_list_empty_is_json_array() {
+    let dir = tempfile::tempdir().unwrap();
+    let j = bind::patch_list(dir.path().to_str().unwrap()).unwrap();
+    assert_eq!(j.trim(), "[]");
+}
+
+#[test]
+fn memory_show_after_init_reports_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_str().unwrap();
+    bind::init(root).unwrap();
+    let j = bind::memory_show(root).unwrap();
+    assert!(j.contains("\"name\""));
+    assert!(j.contains("\"decisions\""));
+}
+
+#[test]
+fn tools_list_includes_builtins() {
+    let dir = tempfile::tempdir().unwrap();
+    let j = bind::tools_list(dir.path().to_str().unwrap()).unwrap();
+    // builtins always register at least one tool; result is a JSON array.
+    assert!(j.starts_with('['));
+}
