@@ -51,6 +51,16 @@ enum Command {
         #[arg(long)]
         from: Option<PathBuf>,
     },
+    /// Create a controlled self-authoring plan for AutoAgent itself.
+    Evolve {
+        objective: String,
+        /// Use an existing JSON plan instead of generating one.
+        #[arg(long)]
+        from: Option<PathBuf>,
+        /// Apply the self-plan (requires allow_self_modification = true).
+        #[arg(long)]
+        apply: bool,
+    },
     /// Revert a previous AutoAgent run.
     Revert { run_id: String },
     /// List or show patch artifacts.
@@ -157,6 +167,22 @@ fn run(cli: Cli) -> Result<()> {
                 return Err(AutoAgentError::Validation(
                     "run finished with failing validation".into(),
                 ));
+            }
+        }
+        Command::Evolve {
+            objective,
+            from,
+            apply,
+        } => {
+            let outcome = commands::evolve(&root, &objective, from, apply)?;
+            if outcome.applied {
+                println!(
+                    "evolve applied on branch {} (run {})",
+                    outcome.branch.as_deref().unwrap_or("?"),
+                    outcome.run_id.as_deref().unwrap_or("?")
+                );
+            } else {
+                println!("evolve plan written: {} (plan-only)", outcome.plan_path);
             }
         }
         Command::Revert { run_id } => {

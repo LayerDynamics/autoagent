@@ -4,6 +4,7 @@ use autoagent_core::config::config_schema::{AutoAgentConfig, LlmConfig};
 use autoagent_core::error::{AutoAgentError, Result};
 use autoagent_core::planning::llm::config::build_provider;
 use autoagent_core::planning::{plan_reader, plan_validator, plan_writer, planner};
+use autoagent_core::runtime::evolve_workflow::{self, EvolveOutcome};
 use autoagent_core::runtime::run_workflow::{self, RunOutcome};
 use autoagent_core::safety::approval_gate::ApprovalGate;
 use autoagent_core::safety::policy_engine::PolicyEngine;
@@ -68,6 +69,33 @@ pub fn plan(root: &Utf8Path, objective: &str, from: Option<PathBuf>) -> Result<U
 
     let (json_path, _md_path) = plan_writer::write_plan(root, &slugify(objective), &plan)?;
     Ok(json_path)
+}
+
+/// Controlled self-authoring: generate (or `--from`) a self-plan, plan-only by
+/// default; `--apply` is gated by `allow_self_modification`.
+pub fn evolve(
+    root: &Utf8Path,
+    objective: &str,
+    from: Option<PathBuf>,
+    apply: bool,
+) -> Result<EvolveOutcome> {
+    let config = AutoAgentConfig::load(root)?;
+    if let Some(f) = from {
+        let plan_path = Utf8PathBuf::from_path_buf(f)
+            .map_err(|_| AutoAgentError::Plan("non-utf8 plan path".into()))?;
+        let plan = plan_reader::read_plan(&plan_path)?;
+        evolve_workflow::evolve_with_plan(root, objective, &plan, apply)
+    } else {
+        let llm = config.llm.clone().unwrap_or_else(default_local_llm);
+        let provider = build_provider(&llm)?;
+        let rt = tokio::runtime::Runtime::new().map_err(AutoAgentError::Io)?;
+        rt.block_on(evolve_workflow::evolve_generated(
+            root,
+            objective,
+            provider.as_ref(),
+            apply,
+        ))
+    }
 }
 
 fn default_local_llm() -> LlmConfig {
