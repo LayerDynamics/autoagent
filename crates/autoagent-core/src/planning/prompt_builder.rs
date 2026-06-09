@@ -5,13 +5,26 @@
 
 use crate::analysis::project_analysis::ProjectAnalysis;
 
-pub fn build(objective: &str, analysis: &ProjectAnalysis) -> String {
+pub fn build(objective: &str, analysis: &ProjectAnalysis, recent_decisions: &[String]) -> String {
     let deps = analysis
         .dependencies
         .iter()
         .map(|d| d.name.as_str())
         .collect::<Vec<_>>()
         .join(", ");
+
+    let decisions = if recent_decisions.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\nPrior project decisions (most recent first):\n{}\n",
+            recent_decisions
+                .iter()
+                .map(|d| format!("- {d}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    };
 
     format!(
         "You are AutoAgent's planner. Produce ONLY a single JSON object matching this schema:\n\
@@ -25,8 +38,9 @@ pub fn build(objective: &str, analysis: &ProjectAnalysis) -> String {
          Constraints: only write under allowed paths; never touch .git, target, .env, SSH material, \
          or any path outside the workspace; rollback_strategy MUST be \"snapshot\".\n\n\
          Project context: language={:?}, dependencies=[{}], top-level dirs={:?}.\n\
+         {}\
          Objective: {}\n",
-        analysis.language, deps, analysis.top_dirs, objective
+        analysis.language, deps, analysis.top_dirs, decisions, objective
     )
 }
 
@@ -46,9 +60,10 @@ mod tests {
             source_files: 0,
             top_dirs: vec![],
         };
-        let p = build("add a cache", &a);
+        let p = build("add a cache", &a, &["2026-06-08: chose TOML".into()]);
         assert!(p.contains("rollback_strategy"));
         assert!(p.contains("add a cache"));
+        assert!(p.contains("chose TOML"));
         assert!(p.contains("never touch .git"));
     }
 }

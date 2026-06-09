@@ -65,7 +65,24 @@ pub async fn run_workflow(
         }
     }
 
+    if report.passed {
+        record_decision(root, &config, &run_id, objective);
+    }
+
     Ok(finish_outcome(run_id, report))
+}
+
+/// Append a decision summarizing a completed run (best-effort: a memory write
+/// failure must not fail an already-completed run).
+fn record_decision(root: &Utf8Path, config: &AutoAgentConfig, run_id: &str, objective: &str) {
+    let store = crate::memory::memory_store::MemoryStore::new(root.join(&config.memory.directory));
+    let _ = store.append_decision(crate::memory::schema::DecisionEntry {
+        id: run_id.to_string(),
+        date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
+        decision: objective.to_string(),
+        rationale: "supervised run completed".into(),
+        run_id: Some(run_id.to_string()),
+    });
 }
 
 fn apply_written_plan(

@@ -20,7 +20,9 @@ pub async fn generate_plan(
     provider: &dyn LlmProvider,
 ) -> Result<Plan> {
     let analysis = project_analyzer::analyze(root, config)?;
-    let context = prompt_builder::build(objective, &analysis);
+    let store = crate::memory::memory_store::MemoryStore::new(root.join(&config.memory.directory));
+    let decisions = crate::memory::project_memory::recent_decision_summaries(&store, 5);
+    let context = prompt_builder::build(objective, &analysis, &decisions);
 
     let raw = provider
         .complete(&PlanRequest {
