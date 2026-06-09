@@ -52,6 +52,7 @@ impl EventLog {
             std::fs::create_dir_all(p.as_std_path())?;
         }
         let evt = serde_json::json!({
+            "schema_version": crate::schema_version::SCHEMA_VERSION,
             "ts": chrono::Utc::now().to_rfc3339(),
             "run_id": self.run_id,
             "seq": self.seq,

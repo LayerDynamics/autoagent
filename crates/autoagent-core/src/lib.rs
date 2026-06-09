@@ -15,4 +15,5 @@ pub mod planning;
 pub mod plugins;
 pub mod runtime;
 pub mod safety;
+pub mod schema_version;
 pub mod validation;

@@ -114,6 +114,7 @@ impl RunLogger {
         let ended = Utc::now();
         let duration_ms = (ended - self.started_at).num_milliseconds().max(0);
         let value = serde_json::json!({
+            "schema_version": crate::schema_version::SCHEMA_VERSION,
             "run_id": self.run_id,
             "task_id": self.task_id.to_string(),
             "objective": self.objective,
