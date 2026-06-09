@@ -70,7 +70,51 @@ pub fn doctor(root: &Utf8Path) -> DoctorReport {
         },
     });
 
+    // Availability of each configured [commands] entry's binary (FR-3).
+    if let Ok(cfg) = &config {
+        for (label, cmd) in [
+            ("cmd:test", &cfg.commands.test),
+            ("cmd:lint", &cfg.commands.lint),
+            ("cmd:format", &cfg.commands.format),
+            ("cmd:build", &cfg.commands.build),
+        ] {
+            checks.push(command_available(label, cmd));
+        }
+    }
+
     DoctorReport { checks }
+}
+
+/// Check that a configured command's executable is resolvable on PATH, without
+/// running the command itself (read-only).
+fn command_available(label: &str, command: &str) -> Check {
+    let bin = command.split_whitespace().next().unwrap_or("");
+    let found = which_in_path(bin);
+    Check {
+        name: label.into(),
+        ok: found,
+        detail: if found {
+            format!("`{bin}` available for `{command}`")
+        } else {
+            format!("`{bin}` not found on PATH for `{command}`")
+        },
+    }
+}
+
+/// Resolve `bin` against PATH entries (read-only; no execution).
+fn which_in_path(bin: &str) -> bool {
+    if bin.is_empty() {
+        return false;
+    }
+    match std::env::var_os("PATH") {
+        Some(paths) => std::env::split_paths(&paths).any(|dir| {
+            let candidate = dir.join(bin);
+            candidate.is_file()
+                || candidate.with_extension("exe").is_file()
+                || candidate.with_extension("cmd").is_file()
+        }),
+        None => false,
+    }
 }
 
 fn tool_check(name: &str, bin: &str, arg: &str) -> Check {

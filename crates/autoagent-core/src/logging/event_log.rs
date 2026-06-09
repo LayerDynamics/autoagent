@@ -32,6 +32,7 @@ pub mod event_types {
 
 pub struct EventLog {
     path: Utf8PathBuf,
+    workspace_path: Option<Utf8PathBuf>,
     run_id: String,
     seq: u64,
 }
@@ -40,9 +41,17 @@ impl EventLog {
     pub fn new(path: Utf8PathBuf, run_id: String) -> Self {
         Self {
             path,
+            workspace_path: None,
             run_id,
             seq: 0,
         }
+    }
+
+    /// Also mirror every event to a workspace-level aggregate log
+    /// (`.agent/logs/events.jsonl`, SPEC-1 FR-10).
+    pub fn with_workspace_log(mut self, workspace_path: Utf8PathBuf) -> Self {
+        self.workspace_path = Some(workspace_path);
+        self
     }
 
     /// Append one event with the common envelope (SPEC-1 §3.4.3).
@@ -60,17 +69,29 @@ impl EventLog {
             "state": state,
             "data": data,
         });
-        let mut f = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(self.path.as_std_path())?;
-        writeln!(f, "{evt}")?;
+        let line = format!("{evt}");
+        append_line(&self.path, &line)?;
+        if let Some(ws) = &self.workspace_path {
+            append_line(ws, &line)?;
+        }
         Ok(())
     }
 
     pub fn seq(&self) -> u64 {
         self.seq
     }
+}
+
+fn append_line(path: &Utf8PathBuf, line: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent.as_std_path())?;
+    }
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path.as_std_path())?;
+    writeln!(f, "{line}")?;
+    Ok(())
 }
 
 #[cfg(test)]

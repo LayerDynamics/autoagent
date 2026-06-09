@@ -1,8 +1,7 @@
-//! Workspace file scanner honoring include/exclude globs (SPEC-1 FR-5).
-//!
-//! `standard_filters(false)` makes the walk deterministic; include/exclude
-//! globs do all the filtering so behavior does not depend on ambient
-//! `.gitignore` state above the workspace.
+//! Workspace file scanner (SPEC-1 FR-5) — honors include/exclude globs AND the
+//! workspace's own `.gitignore`/`.git/info/exclude` (standard ignore semantics).
+//! Ambient parent and global gitignores are disabled so behavior depends only
+//! on the workspace, not on where it happens to live.
 
 use crate::error::{AutoAgentError, Result};
 use camino::{Utf8Path, Utf8PathBuf};
@@ -13,8 +12,12 @@ pub fn scan(root: &Utf8Path, include: &[String], exclude: &[String]) -> Result<V
     let exc = build_set(exclude)?;
     let mut out = Vec::new();
     let walker = ignore::WalkBuilder::new(root)
-        .standard_filters(false)
-        .hidden(false)
+        .hidden(false) // include dotfiles; policy/exclude globs decide
+        .git_ignore(true) // honor the workspace's own .gitignore
+        .git_exclude(true) // and .git/info/exclude
+        .git_global(false) // but NOT the user's global gitignore
+        .parents(false) // and NOT gitignores above the workspace root
+        .require_git(false)
         .build();
     for entry in walker {
         let entry = entry.map_err(|e| AutoAgentError::Analysis(e.to_string()))?;

@@ -20,9 +20,13 @@ pub fn run(
     yes: bool,
 ) -> Result<RunOutcome> {
     let config = AutoAgentConfig::load(root)?;
-    // Resolve the write-approval decision once for the whole supervised run.
+    // Resolve the write- and command-approval decisions once for the whole
+    // supervised run (SPEC-1 FR-15). Denial aborts before anything privileged.
     if config.agent.require_approval_before_write && !yes {
         gate.confirm_write("planned changes")?;
+    }
+    if config.agent.require_approval_before_command && !yes {
+        gate.confirm_command("validation commands")?;
     }
 
     if let Some(f) = from {
@@ -180,17 +184,39 @@ fn memory_store(root: &Utf8Path) -> Result<autoagent_core::memory::memory_store:
 
 pub fn memory_show(root: &Utf8Path) -> Result<()> {
     let store = memory_store(root)?;
+
     let pm = store.load_project()?;
     println!("project: {} ({})", pm.name, pm.language);
     if let Some(pmgr) = &pm.package_manager {
         println!("package manager: {pmgr}");
     }
     println!("source files: {}", pm.source_file_count);
+
     let decisions = store.load_decisions()?;
     println!("decisions: {}", decisions.len());
     for d in &decisions {
         println!("  [{}] {} — {}", d.id, d.date, d.decision);
     }
+
+    let commands = store.load_commands()?;
+    println!(
+        "commands: {} known-good, {} known-failing",
+        commands.known_good.len(),
+        commands.known_failing.len()
+    );
+
+    let architecture = store.load_architecture()?;
+    println!("architecture notes: {}", architecture.len());
+    for a in &architecture {
+        println!("  {} — {}", a.area, a.note);
+    }
+
+    let glossary = store.load_glossary()?;
+    println!("glossary terms: {}", glossary.len());
+    for g in &glossary {
+        println!("  {} — {}", g.term, g.definition);
+    }
+
     Ok(())
 }
 

@@ -25,7 +25,9 @@ pub fn write_plan(root: &Utf8Path, slug: &str, plan: &Plan) -> Result<(Utf8PathB
     Ok((json_path, md_path))
 }
 
-fn render_md(plan: &Plan) -> String {
+/// Render a plan as human-readable Markdown (also used for the run folder's
+/// `plan.md`, SPEC-1 FR-9).
+pub fn render_md(plan: &Plan) -> String {
     let mut s = String::new();
     let _ = writeln!(s, "# Plan: {}\n", plan.objective);
     let _ = writeln!(s, "{}\n", plan.summary);

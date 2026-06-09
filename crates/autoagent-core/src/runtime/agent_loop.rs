@@ -39,7 +39,23 @@ pub fn apply(root: &Utf8Path, plan_path: &Utf8Path, auto_approve: bool) -> Resul
     logger.set_plan_path(plan_path.as_str());
     logger.set_files_read(plan.files_to_read.iter().map(|p| p.to_string()).collect());
 
-    let mut events = EventLog::new(runs_dir.join("events.jsonl"), run_id.clone());
+    // Run-folder contract (SPEC-1 FR-9): human plan + structured operation list.
+    std::fs::write(
+        runs_dir.join("plan.md").as_std_path(),
+        crate::planning::plan_writer::render_md(&plan),
+    )?;
+    std::fs::write(
+        runs_dir.join("file-operations.json").as_std_path(),
+        serde_json::to_string_pretty(&plan.operations)
+            .map_err(|e| AutoAgentError::Serde(e.to_string()))?,
+    )?;
+
+    // Events mirror to the workspace-level aggregate log (SPEC-1 FR-10).
+    let workspace_log = real_root
+        .join(&config.logging.directory)
+        .join("events.jsonl");
+    let mut events = EventLog::new(runs_dir.join("events.jsonl"), run_id.clone())
+        .with_workspace_log(workspace_log);
     events.emit(
         event_types::RUN_STARTED,
         "Created",
@@ -155,6 +171,23 @@ pub fn apply(root: &Utf8Path, plan_path: &Utf8Path, auto_approve: bool) -> Resul
         event_types::PATCH_WRITTEN,
         "ApplyingChanges",
         json!({"patch_path": patch_path}),
+    )?;
+
+    // Complete the run-folder contract (SPEC-1 FR-9). `apply` runs no validation
+    // commands itself (that is the `run` workflow); the report reflects that and
+    // is overwritten by `run` with real results when validation executes.
+    std::fs::write(
+        runs_dir.join("validation-report.md").as_std_path(),
+        "# Validation Report — not run\n\n`apply` does not execute validation commands; use `run` for a validated workflow.\n",
+    )?;
+    std::fs::write(
+        runs_dir.join("summary.md").as_std_path(),
+        format!(
+            "# Run Summary\n\n- Objective: {}\n- State: Completed\n- Operations applied: {}\n- Patch: {}\n",
+            plan.objective,
+            plan.operations.len(),
+            patch_path
+        ),
     )?;
 
     logger.set_state("Completed");
