@@ -1,0 +1,19 @@
+{
+  "version": "1.0.0",
+  "symbols": [
+    { "name": "version", "kind": "sync", "privilege": "read", "args": [], "returns": "number" },
+    { "name": "doctor", "kind": "sync", "privilege": "read", "args": [{ "name": "root", "type": "string" }], "returns": "DoctorReport" },
+    { "name": "analyze", "kind": "sync", "privilege": "read", "args": [{ "name": "root", "type": "string" }], "returns": "ProjectAnalysis" },
+    { "name": "init", "kind": "sync", "privilege": "mutate", "args": [{ "name": "root", "type": "string" }], "returns": "boolean" },
+    { "name": "plan", "kind": "async", "privilege": "read", "args": [{ "name": "root", "type": "string" }, { "name": "objective", "type": "string" }, { "name": "from", "type": "string | null" }], "returns": "string" },
+    { "name": "apply", "kind": "sync", "privilege": "mutate", "args": [{ "name": "root", "type": "string" }, { "name": "plan_path", "type": "string" }, { "name": "opts", "type": "ApproveOpts" }], "returns": "string" },
+    { "name": "run", "kind": "async", "privilege": "mutate", "args": [{ "name": "root", "type": "string" }, { "name": "objective", "type": "string" }, { "name": "from", "type": "string | null" }, { "name": "opts", "type": "ApproveOpts" }], "returns": "RunOutcome" },
+    { "name": "evolve", "kind": "async", "privilege": "mutate", "args": [{ "name": "root", "type": "string" }, { "name": "objective", "type": "string" }, { "name": "from", "type": "string | null" }, { "name": "apply", "type": "boolean" }], "returns": "EvolveOutcome" },
+    { "name": "revert", "kind": "sync", "privilege": "mutate", "args": [{ "name": "root", "type": "string" }, { "name": "run_id", "type": "string" }], "returns": "void" },
+    { "name": "patch_list", "kind": "sync", "privilege": "read", "args": [{ "name": "root", "type": "string" }], "returns": "string[]" },
+    { "name": "patch_show", "kind": "sync", "privilege": "read", "args": [{ "name": "root", "type": "string" }, { "name": "run_id", "type": "string" }], "returns": "string" },
+    { "name": "config_show", "kind": "sync", "privilege": "read", "args": [{ "name": "root", "type": "string" }], "returns": "string" },
+    { "name": "memory_show", "kind": "sync", "privilege": "read", "args": [{ "name": "root", "type": "string" }], "returns": "MemorySummary" },
+    { "name": "tools_list", "kind": "sync", "privilege": "read", "args": [{ "name": "root", "type": "string" }], "returns": "string[]" }
+  ]
+}
