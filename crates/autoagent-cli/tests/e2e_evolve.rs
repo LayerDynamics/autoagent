@@ -70,7 +70,11 @@ fn evolve_plan_only_writes_plan() {
         .current_dir(root)
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     // plan-only: source NOT created
     assert!(!root.join("crates/new.rs").exists());
     // a plan artifact WAS written
