@@ -54,6 +54,19 @@ fn ffi_backend_emits_c_abi() {
     assert!(modts.contains("export function apply"));
     assert!(modts.contains("export class AutoAgentError"));
 
+    let rp = out
+        .get("src/python/python_bingen.rs")
+        .expect("rustpython backend emitted");
+    assert!(rp.contains("#[rustpython_vm::pymodule]"));
+    assert!(rp.contains("#[pyfunction]"));
+    assert!(rp.contains("pub fn module_def"));
+
+    let nb = out
+        .get("src/node/node_bindgen.rs")
+        .expect("node-bindgen backend emitted");
+    assert!(nb.contains("#[node_bindgen"));
+    assert!(nb.contains("napi_register_module_v1"));
+
     let db = out
         .get("src/deno/deno_bindgen.rs")
         .expect("deno_bindgen backend emitted");

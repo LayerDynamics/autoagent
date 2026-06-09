@@ -49,6 +49,7 @@ pub fn render_all() -> BTreeMap<String, String> {
     m.insert("src/node/napi.rs".into(), napi_backend());
     m.insert("src/node/node_bindgen.rs".into(), node_bindgen_backend());
     m.insert("src/python/pyrs.rs".into(), pyo3_backend());
+    m.insert("src/python/python_bingen.rs".into(), rustpython_backend());
     m.insert("src/deno/ffi.rs".into(), ffi_backend());
     m.insert("src/deno/deno_bindgen.rs".into(), deno_bindgen_backend());
     m.insert("deno/mod.ts".into(), deno_mod_ts());
@@ -522,6 +523,96 @@ fn ffi_fn(s: &Symbol) -> String {
         s.name,
         call_args.join(", ")
     )
+}
+
+// ---------------------------------------------------------------------------
+// RustPython backend (Python alternative, CPython-independent). Exposes the
+// surface as a `#[pymodule]` native module installed into a RustPython
+// interpreter via `Interpreter::builder(..).add_native_module(module_def(&ctx))`.
+// ---------------------------------------------------------------------------
+
+const RUSTPYTHON_GLUE: &str = r#"//! RustPython native module exposing the autoagent surface (CPython-free path).
+//! Install it with:
+//!   let builder = rustpython_vm::Interpreter::builder(Default::default());
+//!   let def = autoagent_bingen::python::python_bingen::module_def(&builder.ctx);
+//!   builder.add_native_module(def).build().enter(|vm| { /* import autoagent */ });
+
+/// Public accessor for the native module definition (the `#[pymodule]` macro's
+/// own `module_def` is `pub(crate)` and cannot be re-exported).
+pub fn module_def(
+    ctx: &rustpython_vm::Context,
+) -> &'static rustpython_vm::builtins::PyModuleDef {
+    autoagent::module_def(ctx)
+}
+
+#[rustpython_vm::pymodule]
+mod autoagent {
+    use crate::bind;
+    use rustpython_vm::{builtins::PyBaseExceptionRef, PyResult, VirtualMachine};
+
+    fn err(e: bind::BindError, vm: &VirtualMachine) -> PyBaseExceptionRef {
+        vm.new_runtime_error(format!("[{}|{}] {}", e.code, e.exit_code, e.message))
+    }
+
+"#;
+
+fn rustpython_backend() -> String {
+    let mut out = String::from(HEADER);
+    out.push_str(RUSTPYTHON_GLUE);
+    for s in wired_symbols() {
+        out.push_str(&rustpython_fn(s));
+    }
+    out.push_str("}\n");
+    out
+}
+
+fn rustpython_fn(s: &Symbol) -> String {
+    // Params: registry args + a trailing `vm: &VirtualMachine` for error mapping.
+    let mut params: Vec<String> = s
+        .args
+        .iter()
+        .map(|a| {
+            let ty = match a.ty {
+                "boolean" => "bool",
+                "string | null" => "Option<String>",
+                _ => "String",
+            };
+            format!("{}: {}", a.name, ty)
+        })
+        .collect();
+    params.push("vm: &VirtualMachine".to_string());
+
+    let call_args: Vec<String> = s
+        .args
+        .iter()
+        .map(|a| match a.ty {
+            "boolean" => a.name.to_string(),
+            "string | null" => format!("{}.as_deref()", a.name),
+            _ => format!("&{}", a.name),
+        })
+        .collect();
+    let call = format!("bind::{}({})", s.name, call_args.join(", "));
+    let params = params.join(", ");
+
+    match classify(s) {
+        Ret::Number => format!(
+            "    #[pyfunction]\n    fn {name}({params}) -> PyResult<u32> {{\n        {call}.map(|v| v.trim().parse().unwrap_or(0)).map_err(|e| err(e, vm))\n    }}\n\n",
+            name = s.name
+        ),
+        Ret::Boolean => format!(
+            "    #[pyfunction]\n    fn {name}({params}) -> PyResult<bool> {{\n        {call}.map(|v| v.trim() == \"true\").map_err(|e| err(e, vm))\n    }}\n\n",
+            name = s.name
+        ),
+        Ret::Void => format!(
+            "    #[pyfunction]\n    fn {name}({params}) -> PyResult<()> {{\n        {call}.map(|_| ()).map_err(|e| err(e, vm))\n    }}\n\n",
+            name = s.name
+        ),
+        // JSON and raw text both cross to Python as `str` (JSON-at-boundary).
+        Ret::Str | Ret::Json => format!(
+            "    #[pyfunction]\n    fn {name}({params}) -> PyResult<String> {{\n        {call}.map_err(|e| err(e, vm))\n    }}\n\n",
+            name = s.name
+        ),
+    }
 }
 
 // ---------------------------------------------------------------------------
