@@ -29,6 +29,8 @@ pub enum AutoAgentError {
     Memory(String),
     #[error("llm provider error: {0}")]
     Llm(String),
+    #[error("plugin error: {0}")]
+    Plugin(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("serialization error: {0}")]
@@ -67,6 +69,7 @@ impl AutoAgentError {
             AutoAgentError::Revert(_) => 7,
             AutoAgentError::Memory(_) => 8,
             AutoAgentError::Llm(_)
+            | AutoAgentError::Plugin(_)
             | AutoAgentError::Io(_)
             | AutoAgentError::Serde(_)
             | AutoAgentError::Analysis(_) => 1,
@@ -86,6 +89,7 @@ impl AutoAgentError {
             AutoAgentError::Revert(_) => "revert".into(),
             AutoAgentError::Memory(_) => "memory".into(),
             AutoAgentError::Llm(_) => "llm".into(),
+            AutoAgentError::Plugin(_) => "plugin".into(),
             AutoAgentError::Io(_) => "io".into(),
             AutoAgentError::Serde(_) => "serde".into(),
         }
