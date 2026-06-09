@@ -9,6 +9,7 @@ pub mod config;
 pub mod editing;
 pub mod error;
 pub mod logging;
+pub mod memory;
 pub mod planning;
 pub mod runtime;
 pub mod safety;
