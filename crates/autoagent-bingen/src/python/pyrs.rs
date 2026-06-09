@@ -29,6 +29,26 @@ fn init(root: String) -> PyResult<bool> {
 }
 
 #[pyfunction]
+fn apply(root: String, plan_path: String, approve: bool) -> PyResult<String> {
+    bind::apply(&root, &plan_path, approve).map_err(to_py)
+}
+
+#[pyfunction]
+fn revert(root: String, run_id: String) -> PyResult<()> {
+    bind::revert(&root, &run_id).map(|_| ()).map_err(to_py)
+}
+
+#[pyfunction]
+fn run_sync(root: String, objective: String, from: Option<String>, approve: bool) -> PyResult<String> {
+    bind::run_sync(&root, &objective, from.as_deref(), approve).map_err(to_py)
+}
+
+#[pyfunction]
+fn evolve_sync(root: String, objective: String, from: Option<String>, apply: bool) -> PyResult<String> {
+    bind::evolve_sync(&root, &objective, from.as_deref(), apply).map_err(to_py)
+}
+
+#[pyfunction]
 fn patch_list(root: String) -> PyResult<String> {
     bind::patch_list(&root).map_err(to_py)
 }
@@ -60,6 +80,10 @@ fn autoagent(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(doctor, m)?)?;
     m.add_function(wrap_pyfunction!(analyze, m)?)?;
     m.add_function(wrap_pyfunction!(init, m)?)?;
+    m.add_function(wrap_pyfunction!(apply, m)?)?;
+    m.add_function(wrap_pyfunction!(revert, m)?)?;
+    m.add_function(wrap_pyfunction!(run_sync, m)?)?;
+    m.add_function(wrap_pyfunction!(evolve_sync, m)?)?;
     m.add_function(wrap_pyfunction!(patch_list, m)?)?;
     m.add_function(wrap_pyfunction!(patch_show, m)?)?;
     m.add_function(wrap_pyfunction!(config_show, m)?)?;

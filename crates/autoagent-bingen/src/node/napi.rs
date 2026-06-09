@@ -35,6 +35,28 @@ pub fn init(root: String) -> napi::Result<bool> {
     bind::init(&root).map(|v| v.trim() == "true").map_err(to_napi)
 }
 
+#[napi(js_name = "apply")]
+pub fn apply(root: String, plan_path: String, approve: bool) -> napi::Result<String> {
+    bind::apply(&root, &plan_path, approve).map_err(to_napi)
+}
+
+#[napi(js_name = "revert")]
+pub fn revert(root: String, run_id: String) -> napi::Result<()> {
+    bind::revert(&root, &run_id).map(|_| ()).map_err(to_napi)
+}
+
+#[napi(js_name = "runSync", ts_return_type = "RunOutcome")]
+pub fn run_sync(root: String, objective: String, from: Option<String>, approve: bool) -> napi::Result<serde_json::Value> {
+    let j = bind::run_sync(&root, &objective, from.as_deref(), approve).map_err(to_napi)?;
+    parse(j)
+}
+
+#[napi(js_name = "evolveSync", ts_return_type = "EvolveOutcome")]
+pub fn evolve_sync(root: String, objective: String, from: Option<String>, apply: bool) -> napi::Result<serde_json::Value> {
+    let j = bind::evolve_sync(&root, &objective, from.as_deref(), apply).map_err(to_napi)?;
+    parse(j)
+}
+
 #[napi(js_name = "patchList", ts_return_type = "string[]")]
 pub fn patch_list(root: String) -> napi::Result<serde_json::Value> {
     let j = bind::patch_list(&root).map_err(to_napi)?;

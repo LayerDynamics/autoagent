@@ -39,6 +39,21 @@ fn generate_emits_pyo3_and_pyi() {
 }
 
 #[test]
+fn mutating_sync_surface_emitted() {
+    let out = gen::render_all();
+    let napi = out["src/node/napi.rs"].as_str();
+    let py = out["src/python/pyrs.rs"].as_str();
+    for f in ["apply", "revert", "run_sync", "evolve_sync"] {
+        assert!(py.contains(&format!("fn {f}(")), "pyo3 missing {f}");
+    }
+    assert!(napi.contains("pub fn apply"));
+    assert!(napi.contains("pub fn revert"));
+    assert!(napi.contains("pub fn run_sync"));
+    // The async run/evolve must NOT be emitted yet (unwired — no lying stubs).
+    assert!(!out["dist/index.d.ts"].contains("export function run("));
+}
+
+#[test]
 fn wired_read_surface_present_in_all_stub_dialects() {
     let out = gen::render_all();
     // The read surface added in B2-T1 must appear in both stub dialects.

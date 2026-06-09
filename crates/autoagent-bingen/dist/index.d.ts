@@ -8,6 +8,14 @@ export function doctor(root: string): DoctorReport;
 export function analyze(root: string): ProjectAnalysis;
 /** Initialize Autoagent.toml and the .agent/ tree. */
 export function init(root: string): boolean;
+/** Apply a plan through the policy engine; returns the run id. */
+export function apply(root: string, plan_path: string, approve: boolean): string;
+/** Revert a previous run. */
+export function revert(root: string, run_id: string): void;
+/** Supervised run (blocking) from a plan or generated objective. */
+export function runSync(root: string, objective: string, from: string | null, approve: boolean): RunOutcome;
+/** Controlled self-authoring (blocking). */
+export function evolveSync(root: string, objective: string, from: string | null, apply: boolean): EvolveOutcome;
 /** List patch artifact run ids. */
 export function patchList(root: string): string[];
 /** Show a patch body. */
