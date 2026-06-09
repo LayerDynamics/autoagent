@@ -78,6 +78,16 @@ enum Command {
         #[command(subcommand)]
         sub: MemoryCmd,
     },
+    /// List registered plugin tools.
+    Tools {
+        #[command(subcommand)]
+        sub: ToolsCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum ToolsCmd {
+    List,
 }
 
 #[derive(Subcommand)]
@@ -204,6 +214,9 @@ fn run(cli: Cli) -> Result<()> {
                 rationale,
             } => commands::memory_add(&root, &decision, &rationale)?,
             MemoryCmd::Remove { id } => commands::memory_remove(&root, &id)?,
+        },
+        Command::Tools { sub } => match sub {
+            ToolsCmd::List => commands::tools_list(&root)?,
         },
     }
     Ok(())

@@ -226,3 +226,17 @@ pub fn memory_remove(root: &Utf8Path, id: &str) -> Result<()> {
     }
     Ok(())
 }
+
+pub fn tools_list(root: &Utf8Path) -> Result<()> {
+    let registry = autoagent_core::plugins::with_builtins()?;
+    for name in registry.tool_names() {
+        println!("{name} (native)");
+    }
+    for manifest in autoagent_core::plugins::discover_wasm_plugins(root) {
+        println!(
+            "{} (wasm plugin, api {})",
+            manifest.name, manifest.api_version
+        );
+    }
+    Ok(())
+}
