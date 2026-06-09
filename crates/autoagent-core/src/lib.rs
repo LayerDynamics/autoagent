@@ -8,6 +8,7 @@ pub mod analysis;
 pub mod config;
 pub mod editing;
 pub mod error;
+pub mod git;
 pub mod logging;
 pub mod memory;
 pub mod planning;
