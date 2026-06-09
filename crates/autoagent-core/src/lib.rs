@@ -12,6 +12,7 @@ pub mod git;
 pub mod logging;
 pub mod memory;
 pub mod planning;
+pub mod plugins;
 pub mod runtime;
 pub mod safety;
 pub mod validation;

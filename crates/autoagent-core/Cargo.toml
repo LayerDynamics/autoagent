@@ -21,6 +21,7 @@ camino.workspace = true
 tokio.workspace = true
 reqwest.workspace = true
 async-trait.workspace = true
+autoagent-plugin-sdk = { path = "../autoagent-plugin-sdk" }
 
 [dev-dependencies]
 proptest.workspace = true
