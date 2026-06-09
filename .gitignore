@@ -15,6 +15,11 @@ __pycache__/
 .pytest_cache/
 *.whl
 
+# deno_bindgen-generated TS bindings (downstream artifact of deno_bindgen.rs;
+# regenerate with `deno run -A crates/autoagent-bingen/deno/gen.ts ...`). The
+# Rust backend src/deno/deno_bindgen.rs IS drift-checked; this output is not.
+crates/autoagent-bingen/bindings/
+
 # autoagent-bingen emits drift-checked golden files into dist/ (type stubs +
 # loader shims) that MUST be tracked; only the compiled binaries are ignored.
 !crates/autoagent-bingen/dist/

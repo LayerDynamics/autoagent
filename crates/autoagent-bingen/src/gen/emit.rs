@@ -48,6 +48,9 @@ pub fn render_all() -> BTreeMap<String, String> {
     let mut m = BTreeMap::new();
     m.insert("src/node/napi.rs".into(), napi_backend());
     m.insert("src/python/pyrs.rs".into(), pyo3_backend());
+    m.insert("src/deno/ffi.rs".into(), ffi_backend());
+    m.insert("src/deno/deno_bindgen.rs".into(), deno_bindgen_backend());
+    m.insert("deno/mod.ts".into(), deno_mod_ts());
     m.insert("dist/index.d.ts".into(), dts());
     m.insert("python/autoagent/__init__.pyi".into(), pyi());
     m.insert("schema/surface.schema.json".into(), schema_json());
@@ -350,4 +353,281 @@ fn pyo3_fn(s: &Symbol) -> String {
             "#[pyfunction]\nfn {name}({params}) -> PyResult<String> {{\n    {call}.map_err(to_py)\n}}\n\n"
         ),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Raw C-ABI FFI backend (Deno alternative, dependency-free). Each wired symbol
+// becomes an `aa_<name>` extern "C" function over a `(ptr,len)` JSON-string ABI;
+// results are status-tagged ("0"+payload on success, "1"+error-JSON on error)
+// so both JSON and raw-text payloads cross unambiguously. `aa_free` releases a
+// returned string.
+// ---------------------------------------------------------------------------
+
+const FFI_GLUE: &str = r#"use crate::bind;
+use std::ffi::{c_char, CStr, CString};
+
+/// Borrow a C string as `&str` (empty if null/invalid).
+unsafe fn cs<'a>(p: *const c_char) -> &'a str {
+    if p.is_null() {
+        ""
+    } else {
+        CStr::from_ptr(p).to_str().unwrap_or("")
+    }
+}
+
+/// Borrow an optional C string (`None` if null).
+unsafe fn opt<'a>(p: *const c_char) -> Option<&'a str> {
+    if p.is_null() {
+        None
+    } else {
+        CStr::from_ptr(p).to_str().ok()
+    }
+}
+
+/// Encode a BindResult as an owned, status-tagged C string the caller must free
+/// with `aa_free`: `0` + payload on success, `1` + serialized BindError on error.
+fn out(r: bind::BindResult) -> *mut c_char {
+    let tagged = match r {
+        Ok(payload) => format!("0{payload}"),
+        Err(e) => format!("1{}", serde_json::to_string(&e).unwrap_or_else(|_| "{}".into())),
+    };
+    CString::new(tagged).unwrap_or_default().into_raw()
+}
+
+/// Free a string returned by any `aa_*` function.
+#[no_mangle]
+pub unsafe extern "C" fn aa_free(p: *mut c_char) {
+    if !p.is_null() {
+        drop(CString::from_raw(p));
+    }
+}
+
+"#;
+
+fn ffi_backend() -> String {
+    let mut out = String::from(HEADER);
+    out.push_str(FFI_GLUE);
+    for s in wired_symbols() {
+        out.push_str(&ffi_fn(s));
+    }
+    out
+}
+
+fn ffi_fn(s: &Symbol) -> String {
+    let params: Vec<String> = s
+        .args
+        .iter()
+        .map(|a| {
+            let ty = match a.ty {
+                "boolean" => "i32",
+                _ => "*const c_char",
+            };
+            format!("{}: {}", a.name, ty)
+        })
+        .collect();
+    let call_args: Vec<String> = s
+        .args
+        .iter()
+        .map(|a| match a.ty {
+            "boolean" => format!("{} != 0", a.name),
+            "string | null" => format!("opt({})", a.name),
+            _ => format!("cs({})", a.name),
+        })
+        .collect();
+    format!(
+        "#[no_mangle]\npub unsafe extern \"C\" fn aa_{}({}) -> *mut c_char {{\n    out(bind::{}({}))\n}}\n\n",
+        s.name,
+        params.join(", "),
+        s.name,
+        call_args.join(", ")
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Deno TypeScript FFI wrapper (mod.ts) over the raw C-ABI backend. Presents the
+// same typed surface as the Node .d.ts, hiding Deno.dlopen + the (ptr,len) +
+// aa_free protocol.
+// ---------------------------------------------------------------------------
+
+fn deno_dlopen_param(a: &Arg) -> &'static str {
+    match a.ty {
+        "boolean" => "\"i32\"",
+        _ => "\"pointer\"",
+    }
+}
+
+/// The TS argument expression passed to the FFI symbol for one registry arg.
+fn deno_call_arg(a: &Arg) -> String {
+    match a.ty {
+        "boolean" => format!("{} ? 1 : 0", a.name),
+        "string | null" => format!("{n} == null ? null : ptr(cstr({n}))", n = a.name),
+        _ => format!("ptr(cstr({}))", a.name),
+    }
+}
+
+/// The TS statement decoding the unwrapped body for a symbol's return type.
+fn deno_return(s: &Symbol) -> &'static str {
+    match classify(s) {
+        Ret::Number => "return Number(body);",
+        Ret::Boolean => "return body === \"true\";",
+        Ret::Void => "return;",
+        Ret::Str => "return body;",
+        Ret::Json => "return JSON.parse(body);",
+    }
+}
+
+// ---------------------------------------------------------------------------
+// deno_bindgen backend (Deno primary). The `deno_bindgen` CLI reads the metadata
+// this macro emits and generates the typed TS bindings. Per deno_bindgen 0.8's
+// type system: string params are `&str`, booleans are `u8` (0/1), and the return
+// is `String` (the status-tagged payload). An empty `from` means "none".
+// ---------------------------------------------------------------------------
+
+const DENO_BINDGEN_GLUE: &str = r#"use crate::bind;
+use deno_bindgen::deno_bindgen;
+
+/// Status-tag a BindResult: `0` + payload on success, `1` + error JSON on error.
+fn tag(r: bind::BindResult) -> String {
+    match r {
+        Ok(payload) => format!("0{payload}"),
+        Err(e) => format!("1{}", serde_json::to_string(&e).unwrap_or_else(|_| "{}".into())),
+    }
+}
+
+"#;
+
+fn deno_bindgen_backend() -> String {
+    let mut out = String::from(HEADER);
+    out.push_str(DENO_BINDGEN_GLUE);
+    for s in wired_symbols() {
+        out.push_str(&deno_bindgen_fn(s));
+    }
+    out
+}
+
+fn deno_bindgen_fn(s: &Symbol) -> String {
+    let params: Vec<String> = s
+        .args
+        .iter()
+        .map(|a| {
+            let ty = match a.ty {
+                "boolean" => "u8",
+                // deno_bindgen 0.8 supports `&str` params (owned String panics);
+                // an empty string means "none" for the optional `from` argument.
+                _ => "&str",
+            };
+            format!("{}: {}", a.name, ty)
+        })
+        .collect();
+    // Map an empty optional string to None before the bind call.
+    let mut prelude = String::new();
+    let call_args: Vec<String> = s
+        .args
+        .iter()
+        .map(|a| match a.ty {
+            "boolean" => format!("{} != 0", a.name),
+            "string | null" => {
+                prelude.push_str(&format!(
+                    "    let {n} = if {n}.is_empty() {{ None }} else {{ Some({n}) }};\n",
+                    n = a.name
+                ));
+                a.name.to_string()
+            }
+            _ => a.name.to_string(),
+        })
+        .collect();
+    format!(
+        "#[deno_bindgen]\npub fn aa_{}({}) -> String {{\n{}    tag(bind::{}({}))\n}}\n\n",
+        s.name,
+        params.join(", "),
+        prelude,
+        s.name,
+        call_args.join(", ")
+    )
+}
+
+fn deno_mod_ts() -> String {
+    let mut out = String::from("// DO NOT EDIT — generated by autoagent-bingen.\n");
+    out.push_str(
+        r#"// Deno FFI binding for autoagent-core. Requires --allow-ffi (and
+// --allow-read/--allow-write for mutating ops). Set AUTOAGENT_BINGEN_LIB to the
+// built cdylib, or place it under ../../target/release relative to this file.
+
+const ext = Deno.build.os === "darwin" ? "dylib" : Deno.build.os === "windows" ? "dll" : "so";
+const prefix = Deno.build.os === "windows" ? "" : "lib";
+const defaultLib = new URL(`../../../target/release/${prefix}autoagent_bingen.${ext}`, import.meta.url).pathname;
+const libPath = Deno.env.get("AUTOAGENT_BINGEN_LIB") ?? defaultLib;
+
+"#,
+    );
+
+    // Deno.dlopen symbol table.
+    out.push_str("const lib = Deno.dlopen(libPath, {\n");
+    out.push_str("  aa_free: { parameters: [\"pointer\"], result: \"void\" },\n");
+    for s in wired_symbols() {
+        let params: Vec<&str> = s.args.iter().map(deno_dlopen_param).collect();
+        out.push_str(&format!(
+            "  aa_{}: {{ parameters: [{}], result: \"pointer\" }},\n",
+            s.name,
+            params.join(", ")
+        ));
+    }
+    out.push_str("} as const);\n\n");
+
+    // Helpers + error type.
+    out.push_str(
+        r#"const _enc = new TextEncoder();
+function cstr(s: string): Uint8Array { return _enc.encode(s + "\0"); }
+function ptr(buf: Uint8Array): Deno.PointerValue { return Deno.UnsafePointer.of(buf); }
+
+export class AutoAgentError extends Error {
+  code: string;
+  exitCode: number;
+  constructor(message: string, code: string, exitCode: number) {
+    super(message);
+    this.name = "AutoAgentError";
+    this.code = code;
+    this.exitCode = exitCode;
+  }
+}
+
+function take(p: Deno.PointerValue): string {
+  if (p === null) return "";
+  const s = new Deno.UnsafePointerView(p).getCString();
+  lib.symbols.aa_free(p);
+  return s;
+}
+
+function unwrap(tagged: string): string {
+  const tag = tagged.charAt(0);
+  const body = tagged.slice(1);
+  if (tag === "1") {
+    const e = JSON.parse(body);
+    throw new AutoAgentError(e.message, e.code, e.exit_code);
+  }
+  return body;
+}
+
+"#,
+    );
+
+    // Per-symbol exported wrappers.
+    for s in wired_symbols() {
+        let sig_params: Vec<String> = s
+            .args
+            .iter()
+            .map(|a| format!("{}: {}", a.name, a.ty))
+            .collect();
+        let call_args: Vec<String> = s.args.iter().map(deno_call_arg).collect();
+        out.push_str(&format!(
+            "export function {js}({sig}): {ret} {{\n  const body = unwrap(take(lib.symbols.aa_{name}({call})));\n  {decode}\n}}\n\n",
+            js = camel(s.name),
+            sig = sig_params.join(", "),
+            ret = s.returns,
+            name = s.name,
+            call = call_args.join(", "),
+            decode = deno_return(s),
+        ));
+    }
+    out
 }

@@ -39,6 +39,31 @@ fn generate_emits_pyo3_and_pyi() {
 }
 
 #[test]
+fn ffi_backend_emits_c_abi() {
+    let out = gen::render_all();
+    let ffi = out.get("src/deno/ffi.rs").expect("ffi backend emitted");
+    assert!(ffi.contains("#[no_mangle]"));
+    assert!(ffi.contains("extern \"C\""));
+    assert!(ffi.contains("pub unsafe extern \"C\" fn aa_free"));
+    assert!(ffi.contains("pub unsafe extern \"C\" fn aa_doctor"));
+    assert!(ffi.contains("pub unsafe extern \"C\" fn aa_apply"));
+
+    let modts = out.get("deno/mod.ts").expect("deno mod.ts emitted");
+    assert!(modts.contains("Deno.dlopen"));
+    assert!(modts.contains("export function doctor"));
+    assert!(modts.contains("export function apply"));
+    assert!(modts.contains("export class AutoAgentError"));
+
+    let db = out
+        .get("src/deno/deno_bindgen.rs")
+        .expect("deno_bindgen backend emitted");
+    assert!(db.contains("#[deno_bindgen]"));
+    assert!(db.contains("pub fn aa_doctor(root: &str) -> String"));
+    // booleans are u8 (deno_bindgen 0.8 has no bool param type).
+    assert!(db.contains("approve: u8"));
+}
+
+#[test]
 fn mutating_sync_surface_emitted() {
     let out = gen::render_all();
     let napi = out["src/node/napi.rs"].as_str();

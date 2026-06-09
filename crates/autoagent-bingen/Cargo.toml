@@ -22,6 +22,9 @@ node-napi = ["dep:napi", "dep:napi-derive"]
 node-bindgen = ["dep:node-bindgen"]
 py-pyo3 = ["dep:pyo3", "dep:pyo3-async-runtimes"]
 py-rustpython = ["dep:rustpython-vm"]
+# Deno: deno_bindgen is the primary (annotation-based; its CLI generates the TS
+# bindings). The raw C-ABI FFI cdylib + generated `deno/mod.ts` is the
+# toolchain-free alternative. Both load via Deno.dlopen.
 deno-bindgen = ["dep:deno_bindgen"]
 deno-ffi = []
 
