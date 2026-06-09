@@ -1,6 +1,7 @@
 pub mod agent_loop;
 pub mod doctor;
 pub mod evolve_guard;
+pub mod evolve_workflow;
 pub mod init;
 pub mod repair;
 pub mod revert;
