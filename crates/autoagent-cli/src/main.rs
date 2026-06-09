@@ -63,6 +63,25 @@ enum Command {
         #[command(subcommand)]
         sub: ConfigCmd,
     },
+    /// Show or manage project memory.
+    Memory {
+        #[command(subcommand)]
+        sub: MemoryCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum MemoryCmd {
+    Show,
+    Rebuild,
+    Add {
+        decision: String,
+        #[arg(default_value = "")]
+        rationale: String,
+    },
+    Remove {
+        id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -150,6 +169,15 @@ fn run(cli: Cli) -> Result<()> {
         },
         Command::Config { sub } => match sub {
             ConfigCmd::Show => commands::config_show(&root)?,
+        },
+        Command::Memory { sub } => match sub {
+            MemoryCmd::Show => commands::memory_show(&root)?,
+            MemoryCmd::Rebuild => commands::memory_rebuild(&root)?,
+            MemoryCmd::Add {
+                decision,
+                rationale,
+            } => commands::memory_add(&root, &decision, &rationale)?,
+            MemoryCmd::Remove { id } => commands::memory_remove(&root, &id)?,
         },
     }
     Ok(())

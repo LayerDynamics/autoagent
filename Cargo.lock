@@ -100,6 +100,7 @@ dependencies = [
  "anyhow",
  "autoagent-core",
  "camino",
+ "chrono",
  "clap",
  "console",
  "dialoguer",

@@ -142,3 +142,59 @@ pub fn config_show(root: &Utf8Path) -> Result<()> {
     print!("{text}");
     Ok(())
 }
+
+fn memory_store(root: &Utf8Path) -> Result<autoagent_core::memory::memory_store::MemoryStore> {
+    let cfg = AutoAgentConfig::load(root)?;
+    Ok(autoagent_core::memory::memory_store::MemoryStore::new(
+        root.join(&cfg.memory.directory),
+    ))
+}
+
+pub fn memory_show(root: &Utf8Path) -> Result<()> {
+    let store = memory_store(root)?;
+    let pm = store.load_project()?;
+    println!("project: {} ({})", pm.name, pm.language);
+    if let Some(pmgr) = &pm.package_manager {
+        println!("package manager: {pmgr}");
+    }
+    println!("source files: {}", pm.source_file_count);
+    let decisions = store.load_decisions()?;
+    println!("decisions: {}", decisions.len());
+    for d in &decisions {
+        println!("  [{}] {} — {}", d.id, d.date, d.decision);
+    }
+    Ok(())
+}
+
+pub fn memory_rebuild(root: &Utf8Path) -> Result<()> {
+    let cfg = AutoAgentConfig::load(root)?;
+    let store =
+        autoagent_core::memory::memory_store::MemoryStore::new(root.join(&cfg.memory.directory));
+    let pm = autoagent_core::memory::project_memory::rebuild_project_memory(root, &cfg, &store)?;
+    println!("rebuilt memory for {} ({})", pm.name, pm.language);
+    Ok(())
+}
+
+pub fn memory_add(root: &Utf8Path, decision: &str, rationale: &str) -> Result<()> {
+    let store = memory_store(root)?;
+    let id = format!("d-{}", store.load_decisions()?.len() + 1);
+    store.append_decision(autoagent_core::memory::schema::DecisionEntry {
+        id: id.clone(),
+        date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
+        decision: decision.to_string(),
+        rationale: rationale.to_string(),
+        run_id: None,
+    })?;
+    println!("added decision {id}");
+    Ok(())
+}
+
+pub fn memory_remove(root: &Utf8Path, id: &str) -> Result<()> {
+    let store = memory_store(root)?;
+    if store.remove_decision(id)? {
+        println!("removed decision {id}");
+    } else {
+        println!("no decision {id}");
+    }
+    Ok(())
+}
