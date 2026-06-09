@@ -4,9 +4,42 @@ use autoagent_core::config::config_schema::{AutoAgentConfig, LlmConfig};
 use autoagent_core::error::{AutoAgentError, Result};
 use autoagent_core::planning::llm::config::build_provider;
 use autoagent_core::planning::{plan_reader, plan_validator, plan_writer, planner};
+use autoagent_core::runtime::run_workflow::{self, RunOutcome};
+use autoagent_core::safety::approval_gate::ApprovalGate;
 use autoagent_core::safety::policy_engine::PolicyEngine;
 use camino::{Utf8Path, Utf8PathBuf};
 use std::path::PathBuf;
+
+/// Supervised `run`: plan (or `--from`) → apply → validate → repair → report.
+pub fn run(
+    root: &Utf8Path,
+    objective: &str,
+    from: Option<PathBuf>,
+    gate: &dyn ApprovalGate,
+    yes: bool,
+) -> Result<RunOutcome> {
+    let config = AutoAgentConfig::load(root)?;
+    // Resolve the write-approval decision once for the whole supervised run.
+    if config.agent.require_approval_before_write && !yes {
+        gate.confirm_write("planned changes")?;
+    }
+
+    if let Some(f) = from {
+        let plan_path = Utf8PathBuf::from_path_buf(f)
+            .map_err(|_| AutoAgentError::Plan("non-utf8 plan path".into()))?;
+        run_workflow::run_with_plan(root, &plan_path, true)
+    } else {
+        let llm = config.llm.clone().unwrap_or_else(default_local_llm);
+        let provider = build_provider(&llm)?;
+        let rt = tokio::runtime::Runtime::new().map_err(AutoAgentError::Io)?;
+        rt.block_on(run_workflow::run_workflow(
+            root,
+            objective,
+            provider.as_ref(),
+            true,
+        ))
+    }
+}
 
 /// Create a plan (via the configured LLM provider) or import one with `--from`,
 /// validate it, and write the paired `.plan.json` / `.plan.md` artifacts.

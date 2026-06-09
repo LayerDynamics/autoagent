@@ -44,6 +44,13 @@ enum Command {
     },
     /// Apply a structured plan through the policy-controlled mutation engine.
     Apply { plan: PathBuf },
+    /// Plan, apply, validate, and report in a supervised workflow.
+    Run {
+        objective: String,
+        /// Run an existing JSON plan instead of generating one.
+        #[arg(long)]
+        from: Option<PathBuf>,
+    },
     /// Revert a previous AutoAgent run.
     Revert { run_id: String },
     /// List or show patch artifacts.
@@ -120,6 +127,18 @@ fn run(cli: Cli) -> Result<()> {
             let plan_path = to_utf8(plan)?;
             let run_id = agent_loop::apply_with_gate(&root, &plan_path, gate)?;
             println!("applied run {run_id}");
+        }
+        Command::Run { objective, from } => {
+            let outcome = commands::run(&root, &objective, from, gate, cli.yes)?;
+            println!("run {} — {:?}", outcome.run_id, outcome.final_state);
+            if !matches!(
+                outcome.final_state,
+                autoagent_core::runtime::run_state::RunState::Completed
+            ) {
+                return Err(AutoAgentError::Validation(
+                    "run finished with failing validation".into(),
+                ));
+            }
         }
         Command::Revert { run_id } => {
             revert::revert(&root, &run_id)?;
