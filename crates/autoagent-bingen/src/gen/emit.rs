@@ -47,6 +47,7 @@ fn wired_symbols() -> impl Iterator<Item = &'static Symbol> {
 pub fn render_all() -> BTreeMap<String, String> {
     let mut m = BTreeMap::new();
     m.insert("src/node/napi.rs".into(), napi_backend());
+    m.insert("src/node/node_bindgen.rs".into(), node_bindgen_backend());
     m.insert("src/python/pyrs.rs".into(), pyo3_backend());
     m.insert("src/deno/ffi.rs".into(), ffi_backend());
     m.insert("src/deno/deno_bindgen.rs".into(), deno_bindgen_backend());
@@ -285,6 +286,86 @@ fn napi_fn(s: &Symbol) -> String {
             ret = s.returns
         ),
     }
+}
+
+// ---------------------------------------------------------------------------
+// node-bindgen backend (Node alternative). Returns the status-tagged string
+// (`0`+payload / `1`+error JSON); a JS loader unwraps it. node-bindgen supports
+// String/bool/Option<String> params natively.
+// ---------------------------------------------------------------------------
+
+const NODE_BINDGEN_GLUE: &str = r#"use crate::bind;
+use node_bindgen::derive::node_bindgen;
+
+fn tag(r: bind::BindResult) -> String {
+    match r {
+        Ok(payload) => format!("0{payload}"),
+        Err(e) => format!("1{}", serde_json::to_string(&e).unwrap_or_else(|_| "{}".into())),
+    }
+}
+
+// Modern N-API entry point. nj-core 6.1 only registers via an old `#[ctor]`
+// (`napi_module_register`) that Node 18+ no longer honours. nj-core's
+// `init_modules` is `#[no_mangle] extern "C"` but not reachable by Rust path
+// (private module), so we link to it as a C symbol. Node looks up
+// `napi_register_module_v1` on load; delegating here installs the annotated
+// functions. Build with `-C link-dead-code` so the per-function registration
+// constructors survive the cdylib's `-dead_strip`.
+extern "C" {
+    fn init_modules(
+        env: node_bindgen::sys::napi_env,
+        exports: node_bindgen::sys::napi_value,
+    ) -> node_bindgen::sys::napi_value;
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn napi_register_module_v1(
+    env: node_bindgen::sys::napi_env,
+    exports: node_bindgen::sys::napi_value,
+) -> node_bindgen::sys::napi_value {
+    init_modules(env, exports)
+}
+
+"#;
+
+fn node_bindgen_backend() -> String {
+    let mut out = String::from(HEADER);
+    out.push_str(NODE_BINDGEN_GLUE);
+    for s in wired_symbols() {
+        out.push_str(&node_bindgen_fn(s));
+    }
+    out
+}
+
+fn node_bindgen_fn(s: &Symbol) -> String {
+    let params: Vec<String> = s
+        .args
+        .iter()
+        .map(|a| {
+            let ty = match a.ty {
+                "boolean" => "bool",
+                "string | null" => "Option<String>",
+                _ => "String",
+            };
+            format!("{}: {}", a.name, ty)
+        })
+        .collect();
+    let call_args: Vec<String> = s
+        .args
+        .iter()
+        .map(|a| match a.ty {
+            "boolean" => a.name.to_string(),
+            "string | null" => format!("{}.as_deref()", a.name),
+            _ => format!("&{}", a.name),
+        })
+        .collect();
+    format!(
+        "#[node_bindgen(name = \"{js}\")]\nfn {name}({params}) -> String {{\n    tag(bind::{name}({call}))\n}}\n\n",
+        js = camel(s.name),
+        name = s.name,
+        params = params.join(", "),
+        call = call_args.join(", "),
+    )
 }
 
 // ---------------------------------------------------------------------------

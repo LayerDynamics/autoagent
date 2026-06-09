@@ -5,5 +5,8 @@ fn main() {
     #[cfg(feature = "node-napi")]
     napi_build::setup();
 
+    #[cfg(feature = "node-bindgen")]
+    nj_build::configure();
+
     println!("cargo:rerun-if-changed=bind.rs");
 }

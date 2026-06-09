@@ -19,7 +19,7 @@ path = "src/main.rs"
 # Exactly one backend per build (mutually exclusive at link time).
 default = []
 node-napi = ["dep:napi", "dep:napi-derive"]
-node-bindgen = ["dep:node-bindgen"]
+node-bindgen = ["dep:node-bindgen", "dep:nj-build"]
 py-pyo3 = ["dep:pyo3", "dep:pyo3-async-runtimes"]
 py-rustpython = ["dep:rustpython-vm"]
 # Deno: deno_bindgen is the primary (annotation-based; its CLI generates the TS
@@ -51,6 +51,7 @@ deno_bindgen = { version = "0.8", optional = true }
 
 [build-dependencies]
 napi-build = "2"
+nj-build = { version = "0.3", optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
