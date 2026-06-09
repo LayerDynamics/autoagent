@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AutoAgent Plan",
+  "type": "object",
+  "required": [
+    "objective",
+    "summary",
+    "files_to_read",
+    "files_to_create",
+    "files_to_modify",
+    "operations",
+    "validation_commands",
+    "risks",
+    "rollback_strategy"
+  ],
+  "properties": {
+    "objective": { "type": "string" },
+    "summary": { "type": "string" },
+    "files_to_read": { "type": "array", "items": { "type": "string" } },
+    "files_to_create": { "type": "array", "items": { "$ref": "#/definitions/PlannedFile" } },
+    "files_to_modify": { "type": "array", "items": { "$ref": "#/definitions/PlannedFile" } },
+    "operations": { "type": "array", "items": { "$ref": "#/definitions/FileOperation" } },
+    "validation_commands": { "type": "array", "items": { "type": "string" } },
+    "risks": { "type": "array", "items": { "type": "string" } },
+    "rollback_strategy": { "type": "string", "enum": ["snapshot"] },
+    "schema_version": { "type": "integer" }
+  },
+  "definitions": {
+    "PlannedFile": {
+      "type": "object",
+      "required": ["path", "purpose"],
+      "properties": {
+        "path": { "type": "string" },
+        "purpose": { "type": "string" }
+      }
+    },
+    "FileOperation": {
+      "type": "object",
+      "required": ["kind", "path", "reason"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["Create", "Write", "Replace", "Append", "Delete", "Rename", "CreateDirectory"]
+        },
+        "path": { "type": "string" },
+        "destination_path": { "type": ["string", "null"] },
+        "reason": { "type": "string" },
+        "before_hash": { "type": ["string", "null"] },
+        "after_hash": { "type": ["string", "null"] },
+        "content": { "type": ["string", "null"] }
+      }
+    }
+  }
+}
