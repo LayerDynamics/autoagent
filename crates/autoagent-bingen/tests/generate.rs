@@ -20,3 +20,38 @@ fn generate_emits_napi_and_dts_and_schema() {
     assert!(schema.contains("\"name\": \"run\""));
     assert!(schema.contains("\"privilege\": \"mutate\""));
 }
+
+#[test]
+fn generate_emits_pyo3_and_pyi() {
+    let out = gen::render_all();
+    let py = out
+        .get("src/python/pyrs.rs")
+        .expect("pyo3 backend emitted");
+    assert!(py.contains("#[pyfunction]"));
+    assert!(py.contains("#[pymodule]"));
+    assert!(py.contains("create_exception!"));
+
+    let pyi = out
+        .get("python/autoagent/__init__.pyi")
+        .expect("pyi emitted");
+    assert!(pyi.contains("def doctor"));
+    assert!(pyi.contains("def version"));
+}
+
+#[test]
+fn wired_read_surface_present_in_all_stub_dialects() {
+    let out = gen::render_all();
+    // The read surface added in B2-T1 must appear in both stub dialects.
+    for sym in ["configShow", "patchList", "memoryShow", "toolsList"] {
+        assert!(
+            out["dist/index.d.ts"].contains(sym),
+            "{sym} missing from .d.ts"
+        );
+    }
+    for sym in ["config_show", "patch_list", "memory_show", "tools_list"] {
+        assert!(
+            out["python/autoagent/__init__.pyi"].contains(sym),
+            "{sym} missing from .pyi"
+        );
+    }
+}

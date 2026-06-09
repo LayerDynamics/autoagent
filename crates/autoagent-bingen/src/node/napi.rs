@@ -13,22 +13,53 @@ fn parse(j: String) -> napi::Result<serde_json::Value> {
     serde_json::from_str(&j).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
-#[napi]
+#[napi(js_name = "version")]
 pub fn version() -> napi::Result<u32> {
-    bind::version()
-        .map(|v| v.trim().parse().unwrap_or(0))
-        .map_err(to_napi)
+    bind::version().map(|v| v.trim().parse().unwrap_or(0)).map_err(to_napi)
 }
 
-#[napi(ts_return_type = "DoctorReport")]
+#[napi(js_name = "doctor", ts_return_type = "DoctorReport")]
 pub fn doctor(root: String) -> napi::Result<serde_json::Value> {
     let j = bind::doctor(&root).map_err(to_napi)?;
     parse(j)
 }
 
-#[napi(ts_return_type = "ProjectAnalysis")]
+#[napi(js_name = "analyze", ts_return_type = "ProjectAnalysis")]
 pub fn analyze(root: String) -> napi::Result<serde_json::Value> {
     let j = bind::analyze(&root).map_err(to_napi)?;
+    parse(j)
+}
+
+#[napi(js_name = "init")]
+pub fn init(root: String) -> napi::Result<bool> {
+    bind::init(&root).map(|v| v.trim() == "true").map_err(to_napi)
+}
+
+#[napi(js_name = "patchList", ts_return_type = "string[]")]
+pub fn patch_list(root: String) -> napi::Result<serde_json::Value> {
+    let j = bind::patch_list(&root).map_err(to_napi)?;
+    parse(j)
+}
+
+#[napi(js_name = "patchShow")]
+pub fn patch_show(root: String, run_id: String) -> napi::Result<String> {
+    bind::patch_show(&root, &run_id).map_err(to_napi)
+}
+
+#[napi(js_name = "configShow")]
+pub fn config_show(root: String) -> napi::Result<String> {
+    bind::config_show(&root).map_err(to_napi)
+}
+
+#[napi(js_name = "memoryShow", ts_return_type = "MemorySummary")]
+pub fn memory_show(root: String) -> napi::Result<serde_json::Value> {
+    let j = bind::memory_show(&root).map_err(to_napi)?;
+    parse(j)
+}
+
+#[napi(js_name = "toolsList", ts_return_type = "string[]")]
+pub fn tools_list(root: String) -> napi::Result<serde_json::Value> {
+    let j = bind::tools_list(&root).map_err(to_napi)?;
     parse(j)
 }
 

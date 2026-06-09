@@ -8,16 +8,6 @@ export function doctor(root: string): DoctorReport;
 export function analyze(root: string): ProjectAnalysis;
 /** Initialize Autoagent.toml and the .agent/ tree. */
 export function init(root: string): boolean;
-/** Generate or import+validate a plan; returns the plan path. */
-export function plan(root: string, objective: string, from: string | null): Promise<string>;
-/** Apply a plan through the policy engine; returns the run id. */
-export function apply(root: string, plan_path: string, opts: ApproveOpts): string;
-/** Supervised plan -> apply -> validate -> repair -> report. */
-export function run(root: string, objective: string, from: string | null, opts: ApproveOpts): Promise<RunOutcome>;
-/** Controlled self-authoring plan (apply is policy-gated). */
-export function evolve(root: string, objective: string, from: string | null, apply: boolean): Promise<EvolveOutcome>;
-/** Revert a previous run. */
-export function revert(root: string, run_id: string): void;
 /** List patch artifact run ids. */
 export function patchList(root: string): string[];
 /** Show a patch body. */
