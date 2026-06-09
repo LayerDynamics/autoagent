@@ -1,6 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["crates/autoagent-core", "crates/autoagent-cli"]
+members = [
+    "crates/autoagent-core",
+    "crates/autoagent-cli",
+    "crates/autoagent-plugin-sdk",
+]
 
 [workspace.package]
 version = "0.1.0"
