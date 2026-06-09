@@ -7,6 +7,15 @@
 node_modules/
 dist/
 coverage/
+
+# autoagent-bingen emits drift-checked golden files into dist/ (type stubs +
+# loader shims) that MUST be tracked; only the compiled binaries are ignored.
+!crates/autoagent-bingen/dist/
+crates/autoagent-bingen/dist/*.node
+crates/autoagent-bingen/dist/*.wasm
+crates/autoagent-bingen/dist/*.dylib
+crates/autoagent-bingen/dist/*.so
+crates/autoagent-bingen/dist/*.dll
 *.log
 *.tsbuildinfo
 .idea/
