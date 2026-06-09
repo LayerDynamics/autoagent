@@ -98,8 +98,11 @@ pub fn apply(root: &Utf8Path, plan_path: &Utf8Path, auto_approve: bool) -> Resul
             return Err(e);
         }
 
-        let now_exists = abs.as_std_path().exists();
-        let (after_hash, after_content) = if now_exists {
+        // Hash/snapshot the result only when it is a regular file. Directories
+        // (CreateDirectory) and removed paths (Delete / Rename source) have no
+        // after-hash.
+        let now_is_file = abs.as_std_path().is_file();
+        let (after_hash, after_content) = if now_is_file {
             let h = snapshots.record_after(&real_root, rel.clone())?;
             (
                 h,

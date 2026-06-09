@@ -57,8 +57,8 @@ pub fn revert(root: &Utf8Path, run_id: &str) -> Result<()> {
             .unwrap_or("");
         let abs = real_root.join(path);
 
-        // Drift check: if the file is present, it must match what we wrote.
-        if abs.as_std_path().exists() {
+        // Drift check: if a regular file is present, it must match what we wrote.
+        if abs.as_std_path().is_file() {
             let current = sha256_hex(&std::fs::read(abs.as_std_path())?);
             if !after_hash.is_empty() && current != after_hash {
                 events.emit(
@@ -72,9 +72,13 @@ pub fn revert(root: &Utf8Path, run_id: &str) -> Result<()> {
         }
 
         if before_hash.is_empty() {
-            // The run created this file → remove it.
-            if abs.as_std_path().exists() {
-                std::fs::remove_file(abs.as_std_path())?;
+            // The run created this path → remove it (file or directory).
+            let p = abs.as_std_path();
+            if p.is_dir() {
+                std::fs::remove_dir_all(p)?;
+                restored += 1;
+            } else if p.exists() {
+                std::fs::remove_file(p)?;
                 restored += 1;
             }
         } else {
