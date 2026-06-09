@@ -13,6 +13,7 @@ use crate::runtime::evolve_guard::EvolveGuard;
 use crate::safety::policy_engine::PolicyEngine;
 use camino::{Utf8Path, Utf8PathBuf};
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EvolveOutcome {
     pub plan_path: Utf8PathBuf,
     pub applied: bool,

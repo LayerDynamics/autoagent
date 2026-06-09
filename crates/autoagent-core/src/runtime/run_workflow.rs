@@ -19,6 +19,7 @@ use crate::validation::{command_runner, report_md};
 use camino::{Utf8Path, Utf8PathBuf};
 use serde_json::json;
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RunOutcome {
     pub run_id: String,
     pub final_state: RunState,

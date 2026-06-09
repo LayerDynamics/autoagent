@@ -4,14 +4,14 @@
 use crate::config::config_schema::AutoAgentConfig;
 use camino::Utf8Path;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Check {
     pub name: String,
     pub ok: bool,
     pub detail: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DoctorReport {
     pub checks: Vec<Check>,
 }
@@ -157,5 +157,18 @@ mod tests {
         let root = camino::Utf8Path::from_path(dir.path()).unwrap();
         let report = doctor(root);
         assert!(report.checks.iter().any(|c| c.name == "config" && !c.ok));
+    }
+
+    #[test]
+    fn doctor_report_serializes_to_json() {
+        let r = DoctorReport {
+            checks: vec![Check {
+                name: "x".into(),
+                ok: true,
+                detail: "d".into(),
+            }],
+        };
+        let j = serde_json::to_string(&r).expect("DoctorReport must serialize");
+        assert!(j.contains("\"ok\":true"));
     }
 }
