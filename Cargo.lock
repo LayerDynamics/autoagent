@@ -106,6 +106,7 @@ dependencies = [
  "indicatif",
  "serde_json",
  "tempfile",
+ "tokio",
  "toml",
 ]
 

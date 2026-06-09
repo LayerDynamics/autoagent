@@ -1,8 +1,77 @@
 //! CLI command handlers that render core results (SPEC-1 §3.4).
 
-use autoagent_core::config::config_schema::AutoAgentConfig;
+use autoagent_core::config::config_schema::{AutoAgentConfig, LlmConfig};
 use autoagent_core::error::{AutoAgentError, Result};
-use camino::Utf8Path;
+use autoagent_core::planning::llm::config::build_provider;
+use autoagent_core::planning::{plan_reader, plan_validator, plan_writer, planner};
+use autoagent_core::safety::policy_engine::PolicyEngine;
+use camino::{Utf8Path, Utf8PathBuf};
+use std::path::PathBuf;
+
+/// Create a plan (via the configured LLM provider) or import one with `--from`,
+/// validate it, and write the paired `.plan.json` / `.plan.md` artifacts.
+pub fn plan(root: &Utf8Path, objective: &str, from: Option<PathBuf>) -> Result<Utf8PathBuf> {
+    let config = AutoAgentConfig::load(root)?;
+    let real_root = canonical(root);
+
+    let plan = if let Some(f) = from {
+        let import_path = Utf8PathBuf::from_path_buf(f)
+            .map_err(|_| AutoAgentError::Plan("non-utf8 plan path".into()))?;
+        let imported = plan_reader::read_plan(&import_path)?;
+        let engine = PolicyEngine::from_config(&config, real_root.clone());
+        plan_validator::validate_plan(&imported, &engine)?;
+        imported
+    } else {
+        let llm = config.llm.clone().unwrap_or_else(default_local_llm);
+        let provider = build_provider(&llm)?;
+        let rt = tokio::runtime::Runtime::new().map_err(AutoAgentError::Io)?;
+        rt.block_on(planner::generate_plan(
+            objective,
+            &config,
+            root,
+            provider.as_ref(),
+        ))?
+    };
+
+    let (json_path, _md_path) = plan_writer::write_plan(root, &slugify(objective), &plan)?;
+    Ok(json_path)
+}
+
+fn default_local_llm() -> LlmConfig {
+    LlmConfig {
+        provider: "local".into(),
+        model: "llama3".into(),
+        endpoint: None,
+        code_egress_opt_in: false,
+    }
+}
+
+fn canonical(root: &Utf8Path) -> Utf8PathBuf {
+    std::fs::canonicalize(root.as_std_path())
+        .ok()
+        .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
+        .unwrap_or_else(|| root.to_path_buf())
+}
+
+fn slugify(s: &str) -> String {
+    let mut out = String::new();
+    let mut dash = false;
+    for ch in s.chars().take(40) {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            dash = false;
+        } else if !dash && !out.is_empty() {
+            out.push('-');
+            dash = true;
+        }
+    }
+    let t = out.trim_matches('-').to_string();
+    if t.is_empty() {
+        "plan".into()
+    } else {
+        t
+    }
+}
 
 pub fn patch_list(root: &Utf8Path) -> Result<()> {
     let dir = root.join(".agent/patches");

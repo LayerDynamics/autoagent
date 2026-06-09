@@ -35,6 +35,13 @@ enum Command {
     Doctor,
     /// Analyze the current project and write a project report.
     Analyze,
+    /// Create or import a structured implementation plan.
+    Plan {
+        objective: String,
+        /// Import an existing JSON plan instead of generating one.
+        #[arg(long)]
+        from: Option<PathBuf>,
+    },
     /// Apply a structured plan through the policy-controlled mutation engine.
     Apply { plan: PathBuf },
     /// Revert a previous AutoAgent run.
@@ -103,6 +110,10 @@ fn run(cli: Cli) -> Result<()> {
             let config = autoagent_core::config::config_schema::AutoAgentConfig::load(&root)?;
             let analysis = autoagent_core::analysis::project_analyzer::analyze(&root, &config)?;
             let path = autoagent_core::analysis::report_writer::write_report(&root, &analysis)?;
+            println!("wrote {path}");
+        }
+        Command::Plan { objective, from } => {
+            let path = commands::plan(&root, &objective, from)?;
             println!("wrote {path}");
         }
         Command::Apply { plan } => {
