@@ -37,6 +37,58 @@ pub fn build(objective: &str, analysis: &ProjectAnalysis, recent_decisions: &[St
     )
 }
 
+/// JSON Schema for a `Plan`, handed to schema-aware providers (Ollama structured
+/// outputs) so the model is FORCED to emit a conforming object — `kind` can only
+/// be one of the seven valid operation kinds, etc. This removes the malformed-
+/// plan failures weaker models otherwise produce. Kept inline (flat, no `$ref`)
+/// for broad grammar-engine support; drift-guarded against `Plan` in tests.
+pub fn plan_schema() -> serde_json::Value {
+    let planned_file = serde_json::json!({
+        "type": "object",
+        "properties": {"path": {"type": "string"}, "purpose": {"type": "string"}},
+        "required": ["path", "purpose"]
+    });
+    let operation = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "kind": {"type": "string", "enum": [
+                "Create", "Write", "Replace", "Append", "Delete", "Rename", "CreateDirectory"
+            ]},
+            "path": {"type": "string"},
+            "destination_path": {"type": ["string", "null"]},
+            "reason": {"type": "string"},
+            "before_hash": {"type": ["string", "null"]},
+            "after_hash": {"type": ["string", "null"]},
+            "content": {"type": ["string", "null"]}
+        },
+        "required": ["kind", "path", "reason"]
+    });
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "objective": {"type": "string"},
+            "summary": {"type": "string"},
+            "files_to_read": {"type": "array", "items": {"type": "string"}},
+            "files_to_create": {"type": "array", "items": planned_file},
+            "files_to_modify": {"type": "array", "items": planned_file},
+            "operations": {"type": "array", "items": operation},
+            "validation_commands": {"type": "array", "items": {"type": "string"}},
+            "risks": {"type": "array", "items": {"type": "string"}},
+            "rollback_strategy": {"type": "string"}
+        },
+        "required": [
+            "objective", "summary", "files_to_read", "files_to_create",
+            "files_to_modify", "operations", "validation_commands", "risks",
+            "rollback_strategy"
+        ]
+    })
+}
+
+/// JSON Schema for the scout response: a flat array of path strings.
+pub fn path_list_schema() -> serde_json::Value {
+    serde_json::json!({"type": "array", "items": {"type": "string"}})
+}
+
 /// Build a short "scout" prompt asking the model which existing files it must
 /// read to plan the objective. The planner reads those files and feeds their
 /// contents back into `build_kind` so edits to existing files are accurate.
@@ -217,6 +269,50 @@ mod tests {
         // The model now SEES the real content, so it can edit instead of replace.
         assert!(p.contains("pub mod runtime;"));
         assert!(p.contains("NEVER replace a file you have not been shown"));
+    }
+
+    #[test]
+    fn plan_schema_matches_plan_struct_fields() {
+        // Drift guard: the inline schema's top-level keys must match what a real
+        // Plan serializes to, so adding/removing a Plan field is caught here.
+        let sample = r#"{"objective":"o","summary":"s","files_to_read":[],
+          "files_to_create":[],"files_to_modify":[],
+          "operations":[{"kind":"Create","path":"a.rs","destination_path":null,
+            "reason":"r","before_hash":null,"after_hash":null,"content":"x"}],
+          "validation_commands":[],"risks":[],"rollback_strategy":"snapshot"}"#;
+        let plan: crate::planning::plan::Plan = serde_json::from_str(sample).unwrap();
+        let value = serde_json::to_value(&plan).unwrap();
+        let mut plan_keys: Vec<String> = value.as_object().unwrap().keys().cloned().collect();
+        plan_keys.sort();
+
+        let schema = plan_schema();
+        let mut schema_keys: Vec<String> = schema["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
+        schema_keys.sort();
+        assert_eq!(plan_keys, schema_keys, "plan_schema drifted from Plan");
+
+        // Every FileOperationKind variant must be in the operation `kind` enum.
+        let enum_vals = schema["properties"]["operations"]["items"]["properties"]["kind"]["enum"]
+            .as_array()
+            .unwrap();
+        for k in [
+            "Create",
+            "Write",
+            "Replace",
+            "Append",
+            "Delete",
+            "Rename",
+            "CreateDirectory",
+        ] {
+            assert!(
+                enum_vals.iter().any(|v| v == k),
+                "operation kind enum missing {k}"
+            );
+        }
     }
 
     #[test]

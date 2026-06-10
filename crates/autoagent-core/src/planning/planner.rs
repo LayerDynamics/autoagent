@@ -54,6 +54,9 @@ pub async fn generate_plan_kind(
         .complete(&PlanRequest {
             objective: objective.to_string(),
             context,
+            // Constrain output to the Plan schema so the model cannot emit a
+            // malformed plan (invalid JSON or a bad operation `kind`).
+            format: Some(prompt_builder::plan_schema()),
         })
         .await?;
 
@@ -109,6 +112,7 @@ async fn gather_file_context(
         .complete(&PlanRequest {
             objective: objective.to_string(),
             context: scout,
+            format: Some(prompt_builder::path_list_schema()),
         })
         .await
     {

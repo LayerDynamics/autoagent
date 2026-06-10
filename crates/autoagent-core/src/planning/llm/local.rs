@@ -29,11 +29,16 @@ impl LlmProvider for LocalProvider {
 
     async fn complete(&self, req: &PlanRequest) -> Result<String> {
         let url = format!("{}/api/generate", self.endpoint.trim_end_matches('/'));
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": self.model,
             "prompt": format!("{}\n\n{}", req.objective, req.context),
             "stream": false,
         });
+        // Ollama structured outputs: a JSON-Schema `format` forces the model to
+        // emit a conforming object, so the planner never sees malformed JSON.
+        if let Some(fmt) = &req.format {
+            body["format"] = fmt.clone();
+        }
         let resp = self
             .client
             .post(&url)
@@ -81,10 +86,48 @@ mod tests {
             .complete(&PlanRequest {
                 objective: "o".into(),
                 context: "c".into(),
+                format: None,
             })
             .await
             .unwrap();
         assert_eq!(out, "GENERATED");
         handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn forwards_format_schema_to_ollama() {
+        // Capture the request body and assert the schema is forwarded as `format`.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 8192];
+            let n = stream.read(&mut buf).unwrap();
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            let body = r#"{"response":"[]"}"#;
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(resp.as_bytes()).unwrap();
+            stream.flush().unwrap();
+            req
+        });
+
+        let provider = LocalProvider::new(format!("http://{addr}"), "m".into());
+        provider
+            .complete(&PlanRequest {
+                objective: "o".into(),
+                context: "c".into(),
+                format: Some(serde_json::json!({"type": "array"})),
+            })
+            .await
+            .unwrap();
+        let req = handle.join().unwrap();
+        assert!(
+            req.contains("\"format\"") && req.contains("\"array\""),
+            "request body must carry the JSON-schema format: {req}"
+        );
     }
 }

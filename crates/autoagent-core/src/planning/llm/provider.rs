@@ -7,6 +7,11 @@ use crate::error::Result;
 pub struct PlanRequest {
     pub objective: String,
     pub context: String,
+    /// Optional JSON-Schema constraint on the provider's output (e.g. Ollama
+    /// structured outputs). `None` = unconstrained free text. When set, a
+    /// schema-aware provider forces the model to emit conforming JSON, which
+    /// eliminates malformed-plan parse failures.
+    pub format: Option<serde_json::Value>,
 }
 
 #[async_trait::async_trait]
@@ -46,6 +51,7 @@ mod tests {
             .complete(&PlanRequest {
                 objective: "o".into(),
                 context: "ctx".into(),
+                format: None,
             })
             .await
             .unwrap();
