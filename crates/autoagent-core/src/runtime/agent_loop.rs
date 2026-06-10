@@ -259,6 +259,7 @@ pub fn kind_str(kind: &FileOperationKind) -> &'static str {
         Delete => "Delete",
         Rename => "Rename",
         CreateDirectory => "CreateDirectory",
+        Substitute => "Substitute",
     }
 }
 

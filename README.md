@@ -112,7 +112,7 @@ The same "implement the change when appropriate" directive is applied to ordinar
 
 The supervised `run` loop is built to land a *valid* change, not just any change:
 
-- **Sees the files it edits.** Before planning, the agent is shown the current contents of the files it intends to modify (bounded and secret-scrubbed), so it edits existing files precisely instead of overwriting them with a guess.
+- **Sees the files it edits, and edits surgically.** Before planning, the agent is shown the current contents of the files it intends to modify (bounded and secret-scrubbed). To change an existing file it prefers a `Substitute` op — an exact, unique anchor → replacement — which edits in place and *cannot* truncate or overwrite the rest of the file the way a full-file replace can.
 - **Deterministic auto-heal.** If validation fails only on mechanical issues, the trusted toolchain fixes them with no model round-trip — `cargo fmt` for formatting, `cargo clippy --fix` for autofixable lints — then re-validates. The run's hashes are refreshed so the change stays revertible.
 - **Iterative repair.** If a real failure remains, the failed attempt is reverted and the model is re-prompted with the **full** validation output *and its own previous code*, so it makes a targeted fix — bounded by `max_steps_per_run` (default 12).
 - **Fails closed.** A run is only `Completed` if validation passes; otherwise it ends `Failed` with the tree restored. It does not ship a broken self-change.

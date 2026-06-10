@@ -58,6 +58,35 @@ impl FileEditor {
             CreateDirectory => {
                 std::fs::create_dir_all(abs.as_std_path())?;
             }
+            Substitute => {
+                let anchor = op
+                    .anchor
+                    .as_ref()
+                    .ok_or_else(|| AutoAgentError::Editing("substitute missing anchor".into()))?;
+                let content = op
+                    .content
+                    .as_ref()
+                    .ok_or_else(|| AutoAgentError::Editing("substitute missing content".into()))?;
+                let current = std::fs::read_to_string(abs.as_std_path()).map_err(|e| {
+                    AutoAgentError::Editing(format!("substitute target {}: {e}", op.path))
+                })?;
+                // Require a UNIQUE anchor so the edit is unambiguous and safe.
+                let matches = current.matches(anchor.as_str()).count();
+                if matches == 0 {
+                    return Err(AutoAgentError::Editing(format!(
+                        "substitute anchor not found in {}",
+                        op.path
+                    )));
+                }
+                if matches > 1 {
+                    return Err(AutoAgentError::Editing(format!(
+                        "substitute anchor is not unique ({matches} matches) in {} — include more surrounding context",
+                        op.path
+                    )));
+                }
+                let updated = current.replacen(anchor.as_str(), content, 1);
+                std::fs::write(abs.as_std_path(), updated)?;
+            }
         }
         Ok(())
     }
@@ -78,6 +107,7 @@ mod tests {
             before_hash: None,
             after_hash: None,
             content: content.map(|c| c.to_string()),
+            anchor: None,
         }
     }
 
@@ -114,5 +144,55 @@ mod tests {
         ed.apply(&op(FileOperationKind::Delete, "renamed.txt", None))
             .unwrap();
         assert!(!root.join("renamed.txt").as_std_path().exists());
+    }
+
+    #[test]
+    fn substitute_edits_unique_anchor_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        let ed = FileEditor::new(root.to_path_buf());
+        ed.apply(&op(
+            FileOperationKind::Create,
+            "lib.rs",
+            Some("pub mod a;\npub mod b;\n"),
+        ))
+        .unwrap();
+
+        // Surgical edit: replace exactly one unique anchor, leave the rest intact.
+        let mut sub = op(
+            FileOperationKind::Substitute,
+            "lib.rs",
+            Some("pub mod b;\npub mod c;"),
+        );
+        sub.anchor = Some("pub mod b;".into());
+        ed.apply(&sub).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("lib.rs")).unwrap(),
+            "pub mod a;\npub mod b;\npub mod c;\n"
+        );
+    }
+
+    #[test]
+    fn substitute_rejects_missing_and_ambiguous_anchor() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        let ed = FileEditor::new(root.to_path_buf());
+        ed.apply(&op(FileOperationKind::Create, "f.rs", Some("x\nx\n")))
+            .unwrap();
+
+        // Anchor not present -> error, file untouched.
+        let mut missing = op(FileOperationKind::Substitute, "f.rs", Some("y"));
+        missing.anchor = Some("zzz".into());
+        assert!(ed.apply(&missing).is_err());
+
+        // Anchor not unique (two "x") -> error rather than an ambiguous edit.
+        let mut ambiguous = op(FileOperationKind::Substitute, "f.rs", Some("y"));
+        ambiguous.anchor = Some("x".into());
+        assert!(ed.apply(&ambiguous).is_err());
+
+        assert_eq!(
+            std::fs::read_to_string(root.join("f.rs")).unwrap(),
+            "x\nx\n"
+        );
     }
 }

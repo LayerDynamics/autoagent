@@ -52,6 +52,11 @@ fn validate_op(i: usize, op: &FileOperation, engine: &PolicyEngine) -> Result<()
             "op[{i}] Rename requires destination_path"
         )));
     }
+    if matches!(op.kind, Substitute) && (op.anchor.is_none() || op.content.is_none()) {
+        return Err(AutoAgentError::Plan(format!(
+            "op[{i}] Substitute requires both anchor and content"
+        )));
+    }
     // Every touched path must pass the write policy (blocked/escape bubbles up).
     engine.check_write(op.path.clone())?;
     if let Some(dest) = &op.destination_path {
@@ -82,6 +87,7 @@ mod tests {
             before_hash: None,
             after_hash: None,
             content: content.map(|c| c.to_string()),
+            anchor: None,
         }
     }
 

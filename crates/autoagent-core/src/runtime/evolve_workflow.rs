@@ -192,6 +192,7 @@ mod tests {
                 before_hash: None,
                 after_hash: None,
                 content: Some("// evolved".into()),
+                anchor: None,
             }],
             validation_commands: vec![],
             risks: vec![],

@@ -52,14 +52,16 @@ pub fn plan_schema() -> serde_json::Value {
         "type": "object",
         "properties": {
             "kind": {"type": "string", "enum": [
-                "Create", "Write", "Replace", "Append", "Delete", "Rename", "CreateDirectory"
+                "Create", "Write", "Replace", "Append", "Delete", "Rename",
+                "CreateDirectory", "Substitute"
             ]},
             "path": {"type": "string"},
             "destination_path": {"type": ["string", "null"]},
             "reason": {"type": "string"},
             "before_hash": {"type": ["string", "null"]},
             "after_hash": {"type": ["string", "null"]},
-            "content": {"type": ["string", "null"]}
+            "content": {"type": ["string", "null"]},
+            "anchor": {"type": ["string", "null"]}
         },
         "required": ["kind", "path", "reason"]
     });
@@ -150,10 +152,12 @@ pub fn build_kind(
          the change (build/test/lint). Only return a minimal plan when the objective is purely \
          informational and needs no edits. Each operation's `kind` MUST be EXACTLY ONE of these \
          literal values — Create, Write, Replace, Append, Delete, Rename, CreateDirectory — never the \
-         pipe-joined list itself. When you MODIFY an existing file, base your new `content` on that \
-         file's actual current text shown under \"Existing file contents\" below — reproduce ALL of \
-         its existing content plus your change; NEVER replace a file you have not been shown, and \
-         prefer Append when only adding to the end. Before you emit, mentally EXECUTE every test you \
+         pipe-joined list itself. To EDIT an existing file, PREFER a \
+         `Substitute` operation: set `anchor` to an exact, unique snippet of the current file and \
+         `content` to its replacement — this is a surgical in-place edit and cannot truncate the \
+         rest of the file. Use `Append` to add to the end. Only use `Replace`/`Write` (full-file \
+         content) for a file whose entire current text is shown to you under \"Existing file \
+         contents\"; NEVER replace a file you have not been shown. Before you emit, mentally EXECUTE every test you \
          write against your own implementation and make each assertion match the ACTUAL output — a \
          test whose expected value disagrees with the code (e.g. an off-by-one in a string length) \
          is a defect; fix it before returning. Code must be warning-free and rustfmt-clean.";
@@ -307,6 +311,7 @@ mod tests {
             "Delete",
             "Rename",
             "CreateDirectory",
+            "Substitute",
         ] {
             assert!(
                 enum_vals.iter().any(|v| v == k),
