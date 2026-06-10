@@ -19,6 +19,7 @@ __pycache__/
 sdk/python/autoagent/_native*
 
 crates/autoagent-bingen/deno.lock
+sdk/deno/deno.lock
 
 # deno_bindgen-generated TS bindings (downstream artifact of deno_bindgen.rs;
 # regenerate with `deno run -A crates/autoagent-bingen/deno/gen.ts ...`). The
