@@ -7,6 +7,7 @@ use crate::error::Result;
 use crate::git::branch_manager;
 use crate::planning::llm::provider::LlmProvider;
 use crate::planning::plan::Plan;
+use crate::planning::prompt_builder::PromptKind;
 use crate::planning::{plan_validator, plan_writer, planner};
 use crate::runtime::agent_loop;
 use crate::runtime::evolve_guard::EvolveGuard;
@@ -75,7 +76,17 @@ pub async fn evolve_generated(
     apply: bool,
 ) -> Result<EvolveOutcome> {
     let config = AutoAgentConfig::load(root)?;
-    let plan = planner::generate_plan(objective, &config, root, provider).await?;
+    // Self-authoring posture: the model is told it is changing AutoAgent's own
+    // source and to implement the concrete change (with cargo validation) when
+    // the objective warrants it. Policy validation downstream is unchanged.
+    let plan = planner::generate_plan_kind(
+        PromptKind::SelfAuthoring,
+        objective,
+        &config,
+        root,
+        provider,
+    )
+    .await?;
     evolve_with_plan(root, objective, &plan, apply)
 }
 
@@ -118,6 +129,50 @@ fn slugify(s: &str) -> String {
 mod tests {
     use super::*;
     use crate::editing::file_operation::{FileOperation, FileOperationKind};
+    use crate::planning::llm::provider::{LlmProvider, PlanRequest};
+    use std::sync::Mutex;
+
+    /// Captures the prompt context the planner sends, and returns a fixed plan.
+    struct CapturingProvider {
+        seen: Mutex<String>,
+        plan_json: String,
+    }
+    #[async_trait::async_trait]
+    impl LlmProvider for CapturingProvider {
+        fn name(&self) -> &str {
+            "capturing"
+        }
+        async fn complete(&self, req: &PlanRequest) -> Result<String> {
+            *self.seen.lock().unwrap() = req.context.clone();
+            Ok(self.plan_json.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn evolve_generated_uses_self_authoring_prompt() {
+        let dir = workspace(false);
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        let provider = CapturingProvider {
+            seen: Mutex::new(String::new()),
+            plan_json: r#"{"objective":"o","summary":"s","files_to_read":[],
+              "files_to_create":[{"path":"crates/x.rs","purpose":"p"}],"files_to_modify":[],
+              "operations":[{"kind":"Create","path":"crates/x.rs","destination_path":null,
+                "reason":"r","before_hash":null,"after_hash":null,"content":"// x"}],
+              "validation_commands":["cargo test"],"risks":[],"rollback_strategy":"snapshot"}"#
+                .into(),
+        };
+        // plan-only (apply=false) — no git needed.
+        let outcome = evolve_generated(root, "improve the planner", &provider, false)
+            .await
+            .unwrap();
+        assert!(!outcome.applied);
+        let prompt = provider.seen.lock().unwrap().clone();
+        assert!(
+            prompt.contains("improving its OWN source"),
+            "evolve must use the self-authoring prompt; got:\n{prompt}"
+        );
+        assert!(prompt.contains("cargo test"));
+    }
 
     fn plan_creating(path: &str) -> Plan {
         Plan {

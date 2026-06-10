@@ -9,11 +9,27 @@ use crate::error::{AutoAgentError, Result};
 use crate::planning::llm::provider::{LlmProvider, PlanRequest};
 use crate::planning::llm::redactor::Redactor;
 use crate::planning::plan::Plan;
+use crate::planning::prompt_builder::PromptKind;
 use crate::planning::{plan_validator, prompt_builder};
 use crate::safety::policy_engine::PolicyEngine;
 use camino::{Utf8Path, Utf8PathBuf};
 
+/// Generate a plan for the user's project (the `plan`/`run` path).
 pub async fn generate_plan(
+    objective: &str,
+    config: &AutoAgentConfig,
+    root: &Utf8Path,
+    provider: &dyn LlmProvider,
+) -> Result<Plan> {
+    generate_plan_kind(PromptKind::Project, objective, config, root, provider).await
+}
+
+/// Generate a plan for the given planning posture. `SelfAuthoring` tells the
+/// model it is changing AutoAgent's own source (used by `evolve`); the post-plan
+/// policy validation is identical either way — the model never gains write
+/// authority (SPEC-1 FR-22).
+pub async fn generate_plan_kind(
+    kind: PromptKind,
     objective: &str,
     config: &AutoAgentConfig,
     root: &Utf8Path,
@@ -22,7 +38,7 @@ pub async fn generate_plan(
     let analysis = project_analyzer::analyze(root, config)?;
     let store = crate::memory::memory_store::MemoryStore::new(root.join(&config.memory.directory));
     let decisions = crate::memory::project_memory::recent_decision_summaries(&store, 5);
-    let context = prompt_builder::build(objective, &analysis, &decisions);
+    let context = prompt_builder::build_kind(kind, objective, &analysis, &decisions);
 
     let raw = provider
         .complete(&PlanRequest {

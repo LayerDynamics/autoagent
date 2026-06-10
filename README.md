@@ -87,6 +87,21 @@ These defaults are on out of the box and are the load-bearing posture:
 - **The workspace is a hard boundary.** Writes outside the configured allowed paths are denied; `.git`, `target`, `.env*`, SSH material, and any path that escapes the workspace are blocked by default — enforced against the *model's own output*, so a bad suggestion is rejected before it ever reaches disk.
 - **Self-modification is off** (`allow_self_modification = false`). The agent can work on its *own* source via `evolve`, but only plan-only by default; self-apply is opt-in and runs on an isolated `autoagent/evolve/<run-id>` branch. The stance is **controlled self-authoring, not uncontrolled self-replication**.
 
+## Improving itself
+
+Pointed at its own repository, AutoAgent is explicitly directed to implement changes to its *own* code when the objective calls for it. The `evolve` path uses a distinct **self-authoring** prompt that tells the model the workspace *is* the AutoAgent codebase (the Rust crates under `crates/`), to author the concrete changes to the relevant crate(s) — not a timid or empty plan — and to **always include the `cargo test` / `cargo clippy` / `cargo fmt` validation commands** so the supervised loop verifies (and, on failure, repairs) every self-change before it is accepted. A bug-fix objective is told to add a regression test.
+
+```bash
+# plan-only by default — review what it proposes to change about itself
+autoagent evolve "make the local provider surface Ollama's error message on failure"
+
+# opt in to let it apply the self-change (isolated on an autoagent/evolve/<id> branch)
+#   set allow_self_modification = true in Autoagent.toml, then:
+autoagent evolve --apply "…"
+```
+
+The same "implement the change when appropriate" directive is applied to ordinary `run`/`plan` jobs too: when an objective requires code, the agent is told to author the concrete operations and validation rather than describe them.
+
 ## Commands
 
 | Command | Purpose | Default write behavior |
