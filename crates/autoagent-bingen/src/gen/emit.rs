@@ -81,6 +81,7 @@ pub fn render_all() -> BTreeMap<String, String> {
     m.insert("src/deno/ffi.rs".into(), ffi_backend());
     m.insert("src/deno/deno_bindgen.rs".into(), deno_bindgen_backend());
     m.insert("deno/mod.ts".into(), deno_mod_ts());
+    m.insert("deno/_models.ts".into(), ts_models());
     m.insert("dist/index.d.ts".into(), dts());
     m.insert("python/autoagent/__init__.pyi".into(), pyi());
     m.insert("schema/surface.schema.json".into(), schema_json());
@@ -1226,6 +1227,13 @@ fn deno_mod_ts() -> String {
         r#"// Deno FFI binding for autoagent-core. Requires --allow-ffi (and
 // --allow-read/--allow-write for mutating ops). Set AUTOAGENT_BINGEN_LIB to the
 // built cdylib, or place it under ../../target/release relative to this file.
+import type {
+  DoctorReport,
+  EvolveOutcome,
+  MemorySummary,
+  ProjectAnalysis,
+  RunOutcome,
+} from "./_models.ts";
 
 const ext = Deno.build.os === "darwin" ? "dylib" : Deno.build.os === "windows" ? "dll" : "so";
 const prefix = Deno.build.os === "windows" ? "" : "lib";
@@ -1252,7 +1260,11 @@ const libPath = Deno.env.get("AUTOAGENT_BINGEN_LIB") ?? defaultLib;
     out.push_str(
         r#"const _enc = new TextEncoder();
 function cstr(s: string): Uint8Array { return _enc.encode(s + "\0"); }
-function ptr(buf: Uint8Array): Deno.PointerValue { return Deno.UnsafePointer.of(buf); }
+function ptr(buf: Uint8Array): Deno.PointerValue {
+  // TextEncoder always allocates a plain ArrayBuffer (never SharedArrayBuffer);
+  // assert it for Deno's strict UnsafePointer.of signature.
+  return Deno.UnsafePointer.of(buf as Uint8Array<ArrayBuffer>);
+}
 
 export class AutoAgentError extends Error {
   code: string;

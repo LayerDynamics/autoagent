@@ -2,6 +2,13 @@
 // Deno FFI binding for autoagent-core. Requires --allow-ffi (and
 // --allow-read/--allow-write for mutating ops). Set AUTOAGENT_BINGEN_LIB to the
 // built cdylib, or place it under ../../target/release relative to this file.
+import type {
+  DoctorReport,
+  EvolveOutcome,
+  MemorySummary,
+  ProjectAnalysis,
+  RunOutcome,
+} from "./_models.ts";
 
 const ext = Deno.build.os === "darwin" ? "dylib" : Deno.build.os === "windows" ? "dll" : "so";
 const prefix = Deno.build.os === "windows" ? "" : "lib";
@@ -27,7 +34,11 @@ const lib = Deno.dlopen(libPath, {
 
 const _enc = new TextEncoder();
 function cstr(s: string): Uint8Array { return _enc.encode(s + "\0"); }
-function ptr(buf: Uint8Array): Deno.PointerValue { return Deno.UnsafePointer.of(buf); }
+function ptr(buf: Uint8Array): Deno.PointerValue {
+  // TextEncoder always allocates a plain ArrayBuffer (never SharedArrayBuffer);
+  // assert it for Deno's strict UnsafePointer.of signature.
+  return Deno.UnsafePointer.of(buf as Uint8Array<ArrayBuffer>);
+}
 
 export class AutoAgentError extends Error {
   code: string;
