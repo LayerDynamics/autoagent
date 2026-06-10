@@ -1,9 +1,12 @@
 name: bingen-release
 
-# Publishes the AutoAgent native bindings on a bingen tag:
+# Publishes the AutoAgent bindings + typed SDKs on a bingen tag:
 #   npm  → @autoagent/native (per-platform napi .node prebuilds)
-#   PyPI → autoagent (abi3 wheels via maturin)
+#        → @autoagent/sdk    (typed wrapper, depends on @autoagent/native)
+#   PyPI → autoagent         (the sdk/python mixed wheel: wrapper + _native)
 #   JSR  → @autoagent/native (Deno module)
+#        → @autoagent/sdk    (typed wrapper, depends on @autoagent/native)
+# Native packages publish first; each SDK depends on its published native peer.
 on:
   push:
     tags:
@@ -90,7 +93,10 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-  # Build + publish abi3 wheels via maturin (PyPI trusted publishing / OIDC).
+  # Build + publish the `autoagent` PyPI package = the sdk/python mixed wheel
+  # (pure-Python typed wrapper bundling the pyo3 `_native` extension). The bare
+  # native crate's pyproject is for local dev/test only; the SDK wheel is the
+  # single published `autoagent` distribution. abi3 → one wheel per platform.
   pypi:
     needs: gate
     strategy:
@@ -106,16 +112,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Build wheel
-        working-directory: crates/autoagent-bingen
+      - name: Build the SDK wheel
+        working-directory: sdk/python
         run: |
-          pip install maturin
-          maturin build --release --features py-pyo3 --out dist
+          pip install "maturin>=1.5,<2"
+          maturin build --release --out dist
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: crates/autoagent-bingen/dist
+          packages-dir: sdk/python/dist
 
-  # Publish the Deno module to JSR.
+  # Publish the native Deno module to JSR.
   jsr:
     needs: gate
     runs-on: ubuntu-latest
@@ -129,3 +135,51 @@ jobs:
       - name: Publish to JSR
         working-directory: crates/autoagent-bingen
         run: deno publish
+
+  # ---------------------------------------------------------------------------
+  # SDK packages — each depends on its native peer being published first, so the
+  # workspace `file:`/relative references are rewritten to the published version.
+  # ---------------------------------------------------------------------------
+
+  # @autoagent/sdk on npm, pinned to the just-published @autoagent/native.
+  npm-publish-sdk:
+    needs: npm-publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Pin @autoagent/native, install, build
+        working-directory: sdk/node
+        run: |
+          NATIVE_VER=$(node -p "require('../../crates/autoagent-bingen/package.json').version")
+          npm pkg set "dependencies.@autoagent/native=^$NATIVE_VER"
+          npm install
+          npm run build
+      - name: Publish @autoagent/sdk
+        working-directory: sdk/node
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # @autoagent/sdk on JSR, with the relative native import rewritten to jsr:.
+  jsr-sdk:
+    needs: jsr
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Point the SDK at the published native module
+        working-directory: sdk/deno
+        run: |
+          NATIVE_VER=$(deno eval "console.log(JSON.parse(Deno.readTextFileSync('../../crates/autoagent-bingen/deno.json')).version)")
+          sed -i "s|../../crates/autoagent-bingen/deno/mod.ts|jsr:@autoagent/native@^$NATIVE_VER|g" mod.ts client.ts errors.ts
+      - name: Publish @autoagent/sdk to JSR
+        working-directory: sdk/deno
+        run: deno publish --allow-dirty
