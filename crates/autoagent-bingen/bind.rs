@@ -242,14 +242,14 @@ pub fn memory_show(root: &str) -> BindResult {
         autoagent_core::memory::memory_store::MemoryStore::new(root.join(&cfg.memory.directory));
     let pm = store.load_project()?;
     let decisions = store.load_decisions()?;
-    let summary = serde_json::json!({
-        "name": pm.name,
-        "language": pm.language,
-        "package_manager": pm.package_manager,
-        "source_file_count": pm.source_file_count,
-        "decisions": decisions.len(),
-    });
-    Ok(summary.to_string())
+    let summary = autoagent_core::memory::summary::MemorySummary {
+        name: pm.name,
+        language: pm.language,
+        package_manager: pm.package_manager,
+        source_file_count: pm.source_file_count,
+        decisions: decisions.len(),
+    };
+    serde_json::to_string(&summary).map_err(serde_err)
 }
 
 /// List registered plugin tools (builtins + discovered WASM plugins) as a JSON
