@@ -101,7 +101,10 @@ pub fn build_kind(
          pipe-joined list itself. When you MODIFY an existing file, base your new `content` on that \
          file's actual current text shown under \"Existing file contents\" below — reproduce ALL of \
          its existing content plus your change; NEVER replace a file you have not been shown, and \
-         prefer Append when only adding to the end.";
+         prefer Append when only adding to the end. Before you emit, mentally EXECUTE every test you \
+         write against your own implementation and make each assertion match the ACTUAL output — a \
+         test whose expected value disagrees with the code (e.g. an off-by-one in a string length) \
+         is a defect; fix it before returning. Code must be warning-free and rustfmt-clean.";
 
     let self_directive = match kind {
         PromptKind::Project => String::new(),

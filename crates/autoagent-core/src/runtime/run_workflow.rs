@@ -11,7 +11,7 @@ use crate::error::{AutoAgentError, Result};
 use crate::planning::llm::provider::LlmProvider;
 use crate::planning::{plan_reader, plan_writer, planner};
 use crate::runtime::agent_loop;
-use crate::runtime::repair::{RepairContext, StepBudget};
+use crate::runtime::repair::StepBudget;
 use crate::runtime::run_state::RunState;
 use crate::safety::policy_engine::PolicyEngine;
 use crate::validation::validation_report::ValidationReport;
@@ -51,20 +51,20 @@ pub async fn run_workflow(
     let (mut run_id, mut report) = apply_written_plan(root, objective, &plan, auto_approve)?;
 
     if !report.passed {
+        let real_root = canonical(root);
         let mut budget = StepBudget::new(config.agent.max_steps_per_run);
         while !report.passed && budget.try_consume() {
-            // Revert the failed attempt BEFORE re-planning, so each repair starts
-            // from the pre-failure tree. Without this, a destructive attempt
-            // (e.g. a bad full-file replace) poisons every later repair, which
-            // can then never recover. The repair re-plans the whole objective
-            // from that clean base with the failure context.
+            // Capture what the failed attempt authored BEFORE reverting it, so the
+            // repair can fix the specific defect (e.g. a wrong test assertion)
+            // instead of re-guessing the whole change from scratch.
+            let run_dir = real_root.join(&config.runs.directory).join(&run_id);
+            let prior_files = read_authored_files(&run_dir);
+
+            // Revert the failed attempt so the repair starts from the pre-failure
+            // tree — a destructive attempt must not poison later repairs.
             crate::runtime::revert::revert(root, &run_id)?;
 
-            let ctx = RepairContext::from_failure(&report);
-            let repair_objective = format!(
-                "{objective}\n\nThe previous attempt failed validation command `{}`:\n{}",
-                ctx.failing_command, ctx.error_excerpt
-            );
+            let repair_objective = build_repair_objective(objective, &report, &prior_files);
             let repair_plan =
                 planner::generate_plan(&repair_objective, &config, root, provider).await?;
             let (rid, rep) = apply_written_plan(root, objective, &repair_plan, auto_approve)?;
@@ -93,6 +93,69 @@ fn record_decision(root: &Utf8Path, config: &AutoAgentConfig, run_id: &str, obje
     });
 }
 
+/// Read the file operations an attempt authored (path + content) from its run
+/// folder, so a repair can see and correct its own prior output.
+fn read_authored_files(run_dir: &Utf8Path) -> Vec<(String, String)> {
+    let text = match std::fs::read_to_string(run_dir.join("file-operations.json").as_std_path()) {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    let ops: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    ops.as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|o| {
+                    let p = o.get("path")?.as_str()?.to_string();
+                    let c = o.get("content")?.as_str()?.to_string();
+                    Some((p, c))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Build a repair prompt that hands the model the FULL failing-validation output
+/// plus its own previous authored content, so it makes a targeted fix instead of
+/// re-guessing the whole change.
+fn build_repair_objective(
+    objective: &str,
+    report: &ValidationReport,
+    prior_files: &[(String, String)],
+) -> String {
+    let failures = report
+        .commands
+        .iter()
+        .filter(|c| c.exit_code != Some(0))
+        .map(|c| {
+            format!(
+                "$ {} (exit {:?})\n{}\n{}",
+                c.command, c.exit_code, c.stdout, c.stderr
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n---\n");
+
+    let prior = if prior_files.is_empty() {
+        String::new()
+    } else {
+        let body = prior_files
+            .iter()
+            .map(|(p, c)| format!("=== {p} (your previous attempt) ===\n{c}"))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        format!("\n\nWhat your previous attempt wrote (now reverted):\n{body}")
+    };
+
+    format!(
+        "{objective}\n\nYour previous attempt FAILED validation. Fix the SPECIFIC problem shown \
+         below — keep what was correct and change only what the failure requires.\n\nFailing \
+         validation output:\n{failures}{prior}\n\nReturn a corrected plan that makes validation pass."
+    )
+}
+
 fn apply_written_plan(
     root: &Utf8Path,
     slug_objective: &str,
@@ -117,7 +180,17 @@ fn apply_and_validate(
     let plan = plan_reader::read_plan(plan_path)?;
     let engine = PolicyEngine::from_config(&config, real_root.clone());
 
-    let report = command_runner::run_all(&plan.validation_commands, real_root.clone(), &engine)?;
+    let mut report =
+        command_runner::run_all(&plan.validation_commands, real_root.clone(), &engine)?;
+
+    // Deterministic auto-heal: mechanical failures (formatting, autofixable
+    // lints) are fixed by the trusted runtime — no model round-trip — then the
+    // run's recorded hashes are refreshed (so revert stays correct) and the
+    // suite is re-validated. This eliminates a whole class of repair iterations.
+    if !report.passed && auto_heal(&real_root, &report) {
+        rerecord_after(&real_root, &config, &run_id)?;
+        report = command_runner::run_all(&plan.validation_commands, real_root.clone(), &engine)?;
+    }
 
     let run_dir = real_root.join(&config.runs.directory).join(&run_id);
     std::fs::write(
@@ -150,6 +223,72 @@ fn apply_and_validate(
     }
 
     Ok((run_id, report))
+}
+
+/// Deterministically fix mechanical validation failures (formatting, autofixable
+/// lints) using the trusted toolchain. Returns true if any fixer ran to success.
+/// Model-authored content is never required; these are reversible source edits.
+fn auto_heal(real_root: &Utf8Path, report: &ValidationReport) -> bool {
+    let mut healed = false;
+    for c in report.commands.iter().filter(|c| c.exit_code != Some(0)) {
+        let cmd = c.command.to_lowercase();
+        if cmd.contains("fmt") {
+            healed |= run_fixer(real_root, &["fmt", "--all"]);
+        } else if cmd.contains("clippy") {
+            healed |= run_fixer(
+                real_root,
+                &[
+                    "clippy",
+                    "--fix",
+                    "--allow-dirty",
+                    "--allow-no-vcs",
+                    "--all-targets",
+                ],
+            );
+        }
+    }
+    healed
+}
+
+fn run_fixer(real_root: &Utf8Path, args: &[&str]) -> bool {
+    std::process::Command::new("cargo")
+        .args(args)
+        .current_dir(real_root.as_std_path())
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// After an auto-heal mutates applied files, refresh each run-tracked file's
+/// `after_hash` in run.json so `revert`'s drift check still matches and the run
+/// stays fully reversible.
+fn rerecord_after(real_root: &Utf8Path, config: &AutoAgentConfig, run_id: &str) -> Result<()> {
+    let run_json = real_root
+        .join(&config.runs.directory)
+        .join(run_id)
+        .join("run.json");
+    let text = match std::fs::read_to_string(run_json.as_std_path()) {
+        Ok(t) => t,
+        Err(_) => return Ok(()),
+    };
+    let mut v: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| AutoAgentError::Serde(e.to_string()))?;
+    if let Some(files) = v.get_mut("files_modified").and_then(|f| f.as_array_mut()) {
+        for f in files.iter_mut() {
+            if let Some(path) = f.get("path").and_then(|p| p.as_str()) {
+                let abs = real_root.join(path);
+                if abs.as_std_path().is_file() {
+                    if let Ok(bytes) = std::fs::read(abs.as_std_path()) {
+                        f["after_hash"] =
+                            json!(crate::editing::snapshot_manager::sha256_hex(&bytes));
+                    }
+                }
+            }
+        }
+    }
+    let out = serde_json::to_string_pretty(&v).map_err(|e| AutoAgentError::Serde(e.to_string()))?;
+    std::fs::write(run_json.as_std_path(), out)?;
+    Ok(())
 }
 
 fn finish_outcome(run_id: String, report: ValidationReport) -> RunOutcome {
@@ -329,6 +468,79 @@ mod tests {
             std::fs::read_to_string(root.join("src/keep.rs")).unwrap(),
             "ORIGINAL",
             "destructive attempt must be reverted before repair"
+        );
+    }
+
+    #[test]
+    fn repair_objective_includes_full_error_and_prior_attempt() {
+        use crate::validation::validation_report::CommandValidationResult;
+        let report = ValidationReport {
+            passed: false,
+            commands: vec![CommandValidationResult {
+                command: "cargo test".into(),
+                exit_code: Some(101),
+                stdout: "running 1 test".into(),
+                stderr: "assertion `left == right` failed\n  left: \"wor\"\n right: \"worl\""
+                    .into(),
+                duration_ms: 5,
+            }],
+        };
+        let prior = vec![("src/x.rs".to_string(), "pub fn f() -> u8 { 1 }".to_string())];
+        let obj = build_repair_objective("add the thing", &report, &prior);
+        assert!(obj.contains("add the thing"));
+        assert!(obj.contains("cargo test"));
+        // The FULL failing output is included (not a 40-line excerpt) so the model
+        // can see the exact assertion mismatch.
+        assert!(obj.contains("left: \"wor\""));
+        assert!(obj.contains("right: \"worl\""));
+        // And the prior attempt's own content, so it can correct itself.
+        assert!(obj.contains("src/x.rs (your previous attempt)"));
+        assert!(obj.contains("pub fn f() -> u8 { 1 }"));
+    }
+
+    /// Auto-heal: a mechanical formatting failure is fixed by the trusted
+    /// toolchain (cargo fmt) without a model round-trip, and the run reaches
+    /// Completed with the file reformatted. Runs real rustfmt.
+    #[test]
+    fn auto_heal_fixes_formatting_and_reaches_completed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        std::fs::write(
+            root.join("Autoagent.toml"),
+            crate::config::default_config::default_toml(),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname=\"demo\"\nversion=\"0.1.0\"\nedition=\"2021\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("src").as_std_path()).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "pub mod messy;\n").unwrap();
+        let plan = root.join("p.json");
+        std::fs::write(
+            &plan,
+            r#"{"objective":"o","summary":"s","files_to_read":[],
+              "files_to_create":[{"path":"src/messy.rs","purpose":"x"}],"files_to_modify":[],
+              "operations":[{"kind":"Create","path":"src/messy.rs","destination_path":null,
+                "reason":"r","before_hash":null,"after_hash":null,"content":"pub fn  add( a:i32 )->i32{a+1}\n"}],
+              "validation_commands":["cargo fmt --all -- --check"],"risks":[],"rollback_strategy":"snapshot"}"#,
+        )
+        .unwrap();
+        let outcome = run_with_plan(
+            root,
+            camino::Utf8Path::from_path(plan.as_std_path()).unwrap(),
+            true,
+        )
+        .unwrap();
+        assert!(
+            matches!(outcome.final_state, RunState::Completed),
+            "auto-heal (cargo fmt) should make the fmt --check validation pass"
+        );
+        let healed = std::fs::read_to_string(root.join("src/messy.rs")).unwrap();
+        assert!(
+            healed.contains("pub fn add(a: i32) -> i32 {"),
+            "messy.rs should have been reformatted by auto-heal, got:\n{healed}"
         );
     }
 }

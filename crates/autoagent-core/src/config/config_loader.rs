@@ -9,7 +9,7 @@ mod tests {
     #[test]
     fn loads_default_config() {
         let cfg = AutoAgentConfig::from_toml_str(&default_config::default_toml()).unwrap();
-        assert_eq!(cfg.agent.max_steps_per_run, 8);
+        assert_eq!(cfg.agent.max_steps_per_run, 12);
         assert!(!cfg.agent.allow_self_modification);
         assert!(cfg.safety.blocked_write_paths.iter().any(|p| p == ".git/"));
         assert!(cfg

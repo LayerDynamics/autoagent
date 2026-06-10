@@ -56,10 +56,16 @@ Add an `[llm]` block to `Autoagent.toml`:
 # Local by default — nothing leaves your machine. Runs against an Ollama-style
 # /api/generate endpoint.
 provider = "local"
-model = "qwen3-coder:30b"          # any local model that supports /api/generate
+model = "qwen2.5-coder:14b"         # a capable coder model that supports /api/generate
 endpoint = "http://localhost:11434"
 code_egress_opt_in = false
 ```
+
+Authoring quality (and how often a self-edit succeeds first try) tracks the model.
+`qwen2.5-coder:14b` is a fast, reliable default; **`qwen2.5-coder:32b`** is the most
+reliable local option if you have the VRAM. The model must expose Ollama's
+`/api/generate` (its capabilities include `completion`) — some chat-only models do
+not. To check: `curl -s localhost:11434/api/show -d '{"model":"<name>"}' | grep completion`.
 
 To use a cloud model, you must **explicitly opt in** (this acknowledges that source code leaves the machine) and provide the key via the environment — never in config:
 
@@ -101,6 +107,17 @@ autoagent evolve --apply "…"
 ```
 
 The same "implement the change when appropriate" directive is applied to ordinary `run`/`plan` jobs too: when an objective requires code, the agent is told to author the concrete operations and validation rather than describe them.
+
+### How a run converges (and why it rarely ships a bad edit)
+
+The supervised `run` loop is built to land a *valid* change, not just any change:
+
+- **Sees the files it edits.** Before planning, the agent is shown the current contents of the files it intends to modify (bounded and secret-scrubbed), so it edits existing files precisely instead of overwriting them with a guess.
+- **Deterministic auto-heal.** If validation fails only on mechanical issues, the trusted toolchain fixes them with no model round-trip — `cargo fmt` for formatting, `cargo clippy --fix` for autofixable lints — then re-validates. The run's hashes are refreshed so the change stays revertible.
+- **Iterative repair.** If a real failure remains, the failed attempt is reverted and the model is re-prompted with the **full** validation output *and its own previous code*, so it makes a targeted fix — bounded by `max_steps_per_run` (default 12).
+- **Fails closed.** A run is only `Completed` if validation passes; otherwise it ends `Failed` with the tree restored. It does not ship a broken self-change.
+
+This raises the first-try and within-budget success rate substantially, but success on any given objective still depends on the model — a weak model on a hard task can exhaust the repair budget. Point it at a stronger model (`qwen2.5-coder:32b` or a cloud model) for the highest reliability.
 
 ## Commands
 
