@@ -1,3 +1,4 @@
+pub mod agent_planner;
 pub mod llm;
 pub mod plan;
 pub mod plan_reader;

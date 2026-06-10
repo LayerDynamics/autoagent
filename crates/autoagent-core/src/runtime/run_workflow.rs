@@ -9,7 +9,8 @@
 use crate::config::config_schema::AutoAgentConfig;
 use crate::error::{AutoAgentError, Result};
 use crate::planning::llm::provider::LlmProvider;
-use crate::planning::{plan_reader, plan_writer, planner};
+use crate::planning::prompt_builder::PromptKind;
+use crate::planning::{agent_planner, plan_reader, plan_writer};
 use crate::runtime::agent_loop;
 use crate::runtime::repair::StepBudget;
 use crate::runtime::run_state::RunState;
@@ -47,7 +48,14 @@ pub async fn run_workflow(
 ) -> Result<RunOutcome> {
     let config = AutoAgentConfig::load(root)?;
 
-    let plan = planner::generate_plan(objective, &config, root, provider).await?;
+    let plan = agent_planner::generate_plan_agentic(
+        PromptKind::Project,
+        objective,
+        &config,
+        root,
+        provider,
+    )
+    .await?;
     let (mut run_id, mut report) = apply_written_plan(root, objective, &plan, auto_approve)?;
 
     if !report.passed {
@@ -65,8 +73,14 @@ pub async fn run_workflow(
             crate::runtime::revert::revert(root, &run_id)?;
 
             let repair_objective = build_repair_objective(objective, &report, &prior_files);
-            let repair_plan =
-                planner::generate_plan(&repair_objective, &config, root, provider).await?;
+            let repair_plan = agent_planner::generate_plan_agentic(
+                PromptKind::Project,
+                &repair_objective,
+                &config,
+                root,
+                provider,
+            )
+            .await?;
             let (rid, rep) = apply_written_plan(root, objective, &repair_plan, auto_approve)?;
             run_id = rid;
             report = rep;

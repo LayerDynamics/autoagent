@@ -8,7 +8,7 @@ use crate::git::branch_manager;
 use crate::planning::llm::provider::LlmProvider;
 use crate::planning::plan::Plan;
 use crate::planning::prompt_builder::PromptKind;
-use crate::planning::{plan_validator, plan_writer, planner};
+use crate::planning::{plan_validator, plan_writer};
 use crate::runtime::agent_loop;
 use crate::runtime::evolve_guard::EvolveGuard;
 use crate::safety::policy_engine::PolicyEngine;
@@ -78,8 +78,10 @@ pub async fn evolve_generated(
     let config = AutoAgentConfig::load(root)?;
     // Self-authoring posture: the model is told it is changing AutoAgent's own
     // source and to implement the concrete change (with cargo validation) when
-    // the objective warrants it. Policy validation downstream is unchanged.
-    let plan = planner::generate_plan_kind(
+    // the objective warrants it. Uses the agentic loop (tool-capable providers
+    // read the repo first) with a one-shot fallback; downstream policy
+    // validation is unchanged.
+    let plan = crate::planning::agent_planner::generate_plan_agentic(
         PromptKind::SelfAuthoring,
         objective,
         &config,

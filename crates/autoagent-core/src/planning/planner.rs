@@ -80,7 +80,7 @@ pub async fn generate_plan_kind(
     Ok(plan)
 }
 
-fn extract_json(s: &str) -> Option<&str> {
+pub(crate) fn extract_json(s: &str) -> Option<&str> {
     let start = s.find('{')?;
     let end = s.rfind('}')?;
     (end > start).then(|| &s[start..=end])
