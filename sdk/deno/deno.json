@@ -1,0 +1,10 @@
+{
+  "name": "@autoagent/sdk",
+  "version": "1.0.0",
+  "license": "MIT",
+  "exports": "./mod.ts",
+  "tasks": {
+    "check": "deno check mod.ts",
+    "test": "deno test --allow-ffi --allow-read --allow-write --allow-env"
+  }
+}
