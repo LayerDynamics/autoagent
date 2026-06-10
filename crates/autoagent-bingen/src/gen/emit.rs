@@ -84,6 +84,7 @@ pub fn render_all() -> BTreeMap<String, String> {
     m.insert("dist/index.d.ts".into(), dts());
     m.insert("python/autoagent/__init__.pyi".into(), pyi());
     m.insert("schema/surface.schema.json".into(), schema_json());
+    m.insert("schema/models.schema.json".into(), models_schema());
     m.insert("package.json".into(), package_json());
     m.insert("deno.json".into(), deno_json());
     m.insert("dist/index.js".into(), node_loader_js());
@@ -262,6 +263,38 @@ fn schema_json() -> String {
         "{{\n  \"version\": \"1.0.0\",\n  \"symbols\": [\n{}\n  ]\n}}\n",
         syms.join(",\n")
     )
+}
+
+// ---------------------------------------------------------------------------
+// Model schema (SDK plan S1): the JSON Schema of every boundary return type,
+// derived from core's `JsonSchema` impls. The SDK model codegen (S1-T4) reads
+// this to emit Python dataclasses / TS interfaces.
+// ---------------------------------------------------------------------------
+
+fn models_schema() -> String {
+    use schemars::schema_for;
+    let mut defs = serde_json::Map::new();
+    macro_rules! add {
+        ($t:ty, $name:expr) => {
+            defs.insert(
+                $name.into(),
+                serde_json::to_value(schema_for!($t)).expect("schema serialize"),
+            );
+        };
+    }
+    add!(autoagent_core::runtime::doctor::DoctorReport, "DoctorReport");
+    add!(autoagent_core::runtime::run_workflow::RunOutcome, "RunOutcome");
+    add!(
+        autoagent_core::runtime::evolve_workflow::EvolveOutcome,
+        "EvolveOutcome"
+    );
+    add!(
+        autoagent_core::analysis::project_analysis::ProjectAnalysis,
+        "ProjectAnalysis"
+    );
+    add!(autoagent_core::memory::summary::MemorySummary, "MemorySummary");
+    let doc = serde_json::json!({ "version": "1.0.0", "models": defs });
+    serde_json::to_string_pretty(&doc).expect("models schema") + "\n"
 }
 
 // ---------------------------------------------------------------------------

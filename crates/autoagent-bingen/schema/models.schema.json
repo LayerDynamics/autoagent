@@ -1,0 +1,290 @@
+{
+  "models": {
+    "DoctorReport": {
+      "$defs": {
+        "Check": {
+          "properties": {
+            "detail": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "ok": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "name",
+            "ok",
+            "detail"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/Check"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "checks"
+      ],
+      "title": "DoctorReport",
+      "type": "object"
+    },
+    "EvolveOutcome": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "applied": {
+          "type": "boolean"
+        },
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "plan_path": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "plan_path",
+        "applied"
+      ],
+      "title": "EvolveOutcome",
+      "type": "object"
+    },
+    "MemorySummary": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "decisions": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "package_manager": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_file_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "language",
+        "source_file_count",
+        "decisions"
+      ],
+      "title": "MemorySummary",
+      "type": "object"
+    },
+    "ProjectAnalysis": {
+      "$defs": {
+        "DependencySummary": {
+          "properties": {
+            "dev": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "version",
+            "dev"
+          ],
+          "type": "object"
+        },
+        "LanguageKind": {
+          "enum": [
+            "Rust",
+            "JavaScript",
+            "TypeScript",
+            "Mixed",
+            "Unknown"
+          ],
+          "type": "string"
+        },
+        "PackageManager": {
+          "enum": [
+            "Cargo",
+            "Npm",
+            "Pnpm",
+            "Yarn"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "dependencies": {
+          "items": {
+            "$ref": "#/$defs/DependencySummary"
+          },
+          "type": "array"
+        },
+        "file_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "language": {
+          "$ref": "#/$defs/LanguageKind"
+        },
+        "package_manager": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PackageManager"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "root": {
+          "type": "string"
+        },
+        "source_files": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "top_dirs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "root",
+        "language",
+        "dependencies",
+        "file_count",
+        "source_files",
+        "top_dirs"
+      ],
+      "title": "ProjectAnalysis",
+      "type": "object"
+    },
+    "RunOutcome": {
+      "$defs": {
+        "CommandValidationResult": {
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "duration_ms": {
+              "format": "uint128",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "exit_code": {
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "stderr": {
+              "type": "string"
+            },
+            "stdout": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "stdout",
+            "stderr",
+            "duration_ms"
+          ],
+          "type": "object"
+        },
+        "RunState": {
+          "enum": [
+            "Created",
+            "LoadingConfig",
+            "AnalyzingProject",
+            "LoadingMemory",
+            "Planning",
+            "AwaitingApproval",
+            "Snapshotting",
+            "ApplyingChanges",
+            "Validating",
+            "Repairing",
+            "Completed",
+            "Failed",
+            "Reverted"
+          ],
+          "type": "string"
+        },
+        "ValidationReport": {
+          "properties": {
+            "commands": {
+              "items": {
+                "$ref": "#/$defs/CommandValidationResult"
+              },
+              "type": "array"
+            },
+            "passed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "passed",
+            "commands"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "final_state": {
+          "$ref": "#/$defs/RunState"
+        },
+        "report": {
+          "$ref": "#/$defs/ValidationReport"
+        },
+        "run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "final_state",
+        "report"
+      ],
+      "title": "RunOutcome",
+      "type": "object"
+    }
+  },
+  "version": "1.0.0"
+}

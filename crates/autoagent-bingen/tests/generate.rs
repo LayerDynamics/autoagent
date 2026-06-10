@@ -96,6 +96,26 @@ fn mutating_sync_surface_emitted() {
 }
 
 #[test]
+fn models_schema_emitted() {
+    let out = gen::render_all();
+    let s = out
+        .get("schema/models.schema.json")
+        .expect("models schema emitted");
+    for ty in [
+        "DoctorReport",
+        "RunOutcome",
+        "EvolveOutcome",
+        "ProjectAnalysis",
+        "MemorySummary",
+    ] {
+        assert!(s.contains(ty), "models schema missing {ty}");
+    }
+    // nested types must be present too (RunOutcome -> ValidationReport).
+    assert!(s.contains("source_files"), "ProjectAnalysis fields missing");
+    assert!(s.contains("checks"), "DoctorReport fields missing");
+}
+
+#[test]
 fn package_scaffolds_emitted() {
     let out = gen::render_all();
     assert!(out["package.json"].contains("@autoagent/native"));

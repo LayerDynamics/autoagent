@@ -343,6 +343,7 @@ dependencies = [
  "pyo3",
  "pyo3-async-runtimes",
  "rustpython-vm",
+ "schemars",
  "serde",
  "serde_json",
  "tempfile",
