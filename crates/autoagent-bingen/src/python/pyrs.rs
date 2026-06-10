@@ -85,6 +85,54 @@ fn tools_list(root: String) -> PyResult<String> {
     bind::tools_list(&root).map_err(to_py)
 }
 
+#[pyfunction]
+fn run(
+    py: Python<'_>,
+    root: String,
+    objective: String,
+    from: Option<String>,
+    approve: bool,
+) -> PyResult<pyo3::Bound<'_, pyo3::types::PyAny>> {
+    pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        tokio::task::spawn_blocking(move || {
+            bind::run_sync(&root, &objective, from.as_deref(), approve)
+        })
+        .await
+        .map_err(|e| {
+            to_py(bind::BindError {
+                code: "io".into(),
+                exit_code: 1,
+                message: e.to_string(),
+            })
+        })?
+        .map_err(to_py)
+    })
+}
+
+#[pyfunction]
+fn evolve(
+    py: Python<'_>,
+    root: String,
+    objective: String,
+    from: Option<String>,
+    apply: bool,
+) -> PyResult<pyo3::Bound<'_, pyo3::types::PyAny>> {
+    pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        tokio::task::spawn_blocking(move || {
+            bind::evolve_sync(&root, &objective, from.as_deref(), apply)
+        })
+        .await
+        .map_err(|e| {
+            to_py(bind::BindError {
+                code: "io".into(),
+                exit_code: 1,
+                message: e.to_string(),
+            })
+        })?
+        .map_err(to_py)
+    })
+}
+
 #[pymodule]
 fn autoagent(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("AutoAgentError", m.py().get_type::<AutoAgentError>())?;
@@ -101,5 +149,7 @@ fn autoagent(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(config_show, m)?)?;
     m.add_function(wrap_pyfunction!(memory_show, m)?)?;
     m.add_function(wrap_pyfunction!(tools_list, m)?)?;
+    m.add_function(wrap_pyfunction!(run, m)?)?;
+    m.add_function(wrap_pyfunction!(evolve, m)?)?;
     Ok(())
 }

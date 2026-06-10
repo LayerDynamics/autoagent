@@ -98,3 +98,35 @@ pub fn tools_list(root: String) -> napi::Result<serde_json::Value> {
     let j = bind::tools_list(&root).map_err(to_napi)?;
     parse(j)
 }
+
+#[napi(js_name = "run", ts_return_type = "Promise<RunOutcome>")]
+pub async fn run(
+    root: String,
+    objective: String,
+    from: Option<String>,
+    approve: bool,
+) -> napi::Result<serde_json::Value> {
+    let j = napi::tokio::task::spawn_blocking(move || {
+        bind::run_sync(&root, &objective, from.as_deref(), approve)
+    })
+    .await
+    .map_err(|e| napi::Error::from_reason(e.to_string()))?
+    .map_err(to_napi)?;
+    parse(j)
+}
+
+#[napi(js_name = "evolve", ts_return_type = "Promise<EvolveOutcome>")]
+pub async fn evolve(
+    root: String,
+    objective: String,
+    from: Option<String>,
+    apply: bool,
+) -> napi::Result<serde_json::Value> {
+    let j = napi::tokio::task::spawn_blocking(move || {
+        bind::evolve_sync(&root, &objective, from.as_deref(), apply)
+    })
+    .await
+    .map_err(|e| napi::Error::from_reason(e.to_string()))?
+    .map_err(to_napi)?;
+    parse(j)
+}

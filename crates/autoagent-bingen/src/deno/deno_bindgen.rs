@@ -80,3 +80,15 @@ pub fn aa_memory_show(root: &str) -> String {
 pub fn aa_tools_list(root: &str) -> String {
     tag(bind::tools_list(root))
 }
+
+#[deno_bindgen(non_blocking)]
+pub fn aa_run(root: &str, objective: &str, from: &str, approve: u8) -> String {
+    let from = if from.is_empty() { None } else { Some(from) };
+    tag(bind::run_sync(root, objective, from, approve != 0))
+}
+
+#[deno_bindgen(non_blocking)]
+pub fn aa_evolve(root: &str, objective: &str, from: &str, apply: u8) -> String {
+    let from = if from.is_empty() { None } else { Some(from) };
+    tag(bind::evolve_sync(root, objective, from, apply != 0))
+}

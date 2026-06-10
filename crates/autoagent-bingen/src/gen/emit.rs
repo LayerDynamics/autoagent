@@ -43,6 +43,34 @@ fn wired_symbols() -> impl Iterator<Item = &'static Symbol> {
     SURFACE.iter().filter(|s| is_wired(s))
 }
 
+/// Symbols exposed asynchronously (Promise/awaitable) by the async-capable
+/// backends (napi, pyo3, deno_bindgen). Each delegates to its blocking `*_sync`
+/// wrapper on a worker thread, so the host event loop never blocks and no tokio
+/// runtime nests. node-bindgen, RustPython, and the raw-FFI `mod.ts` expose only
+/// the `*_sync` variants (FR-5 is satisfied by the primary backends).
+const ASYNC_WIRED: &[&str] = &["run", "evolve"];
+
+fn async_symbols() -> impl Iterator<Item = &'static Symbol> {
+    SURFACE.iter().filter(|s| ASYNC_WIRED.contains(&s.name))
+}
+
+/// `bind::<name>_sync(<args>)` — the blocking wrapper an async symbol delegates
+/// to (`run` -> `run_sync`). Args are moved into the worker closure, so string
+/// args are borrowed (`&root`) and the optional `from` becomes `as_deref()`.
+fn bind_sync_call(s: &Symbol) -> String {
+    let args = s
+        .args
+        .iter()
+        .map(|a| match a.ty {
+            "boolean" => a.name.to_string(),
+            "string | null" => format!("{}.as_deref()", a.name),
+            _ => format!("&{}", a.name),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("bind::{}_sync({})", s.name, args)
+}
+
 /// Every generated file as `relative_path -> content`. Pure: no I/O.
 pub fn render_all() -> BTreeMap<String, String> {
     let mut m = BTreeMap::new();
@@ -263,6 +291,20 @@ fn dts() -> String {
             ret
         ));
     }
+    for s in async_symbols() {
+        let params: Vec<String> = s
+            .args
+            .iter()
+            .map(|a| format!("{}: {}", a.name, a.ty))
+            .collect();
+        out.push_str(&format!(
+            "/** {} */\nexport function {}({}): Promise<{}>;\n",
+            s.doc,
+            camel(s.name),
+            params.join(", "),
+            s.returns
+        ));
+    }
     out
 }
 
@@ -291,6 +333,14 @@ fn pyi() -> String {
             s.name,
             params.join(", "),
             py_ret(s)
+        ));
+    }
+    for s in async_symbols() {
+        let params: Vec<String> = s.args.iter().map(|a| format!("{}: str", a.name)).collect();
+        out.push_str(&format!(
+            "async def {}({}) -> str: ...\n",
+            s.name,
+            params.join(", ")
         ));
     }
     out
@@ -322,7 +372,23 @@ fn napi_backend() -> String {
     for s in wired_symbols() {
         out.push_str(&napi_fn(s));
     }
+    for s in async_symbols() {
+        out.push_str(&napi_async_fn(s));
+    }
     out
+}
+
+/// An async napi function returning a JS `Promise`. Runs the blocking wrapper on
+/// napi's tokio blocking pool so the JS event loop is not blocked.
+fn napi_async_fn(s: &Symbol) -> String {
+    let rust = s.name;
+    let js = camel(s.name);
+    let params = napi_params(s.args);
+    let call = bind_sync_call(s);
+    format!(
+        "#[napi(js_name = \"{js}\", ts_return_type = \"Promise<{ret}>\")]\npub async fn {rust}({params}) -> napi::Result<serde_json::Value> {{\n    let j = napi::tokio::task::spawn_blocking(move || {call})\n        .await\n        .map_err(|e| napi::Error::from_reason(e.to_string()))?\n        .map_err(to_napi)?;\n    parse(j)\n}}\n\n",
+        ret = s.returns
+    )
 }
 
 /// `name: Type` params for a napi function from the registry arg types.
@@ -487,10 +553,28 @@ fn pyo3_backend() -> String {
             s.name
         ));
     }
+    for s in async_symbols() {
+        out.push_str(&pyo3_async_fn(s));
+        registrations.push_str(&format!(
+            "    m.add_function(wrap_pyfunction!({}, m)?)?;\n",
+            s.name
+        ));
+    }
     out.push_str(&format!(
         "#[pymodule]\nfn autoagent(m: &Bound<'_, PyModule>) -> PyResult<()> {{\n    m.add(\"AutoAgentError\", m.py().get_type::<AutoAgentError>())?;\n{registrations}    Ok(())\n}}\n"
     ));
     out
+}
+
+/// An async pyo3 function returning a Python awaitable via pyo3-async-runtimes.
+/// The blocking wrapper runs on a tokio blocking thread (no nested runtime).
+fn pyo3_async_fn(s: &Symbol) -> String {
+    let name = s.name;
+    let params = pyo3_params(s.args);
+    let call = bind_sync_call(s);
+    format!(
+        "#[pyfunction]\nfn {name}(py: Python<'_>, {params}) -> PyResult<pyo3::Bound<'_, pyo3::types::PyAny>> {{\n    pyo3_async_runtimes::tokio::future_into_py(py, async move {{\n        tokio::task::spawn_blocking(move || {call})\n            .await\n            .map_err(|e| to_py(bind::BindError {{ code: \"io\".into(), exit_code: 1, message: e.to_string() }}))?\n            .map_err(to_py)\n    }})\n}}\n\n"
+    )
 }
 
 /// `name: Type` params for a pyo3 function.
@@ -768,7 +852,59 @@ fn deno_bindgen_backend() -> String {
     for s in wired_symbols() {
         out.push_str(&deno_bindgen_fn(s));
     }
+    for s in async_symbols() {
+        out.push_str(&deno_bindgen_async_fn(s));
+    }
     out
+}
+
+/// `&str`/`u8` params for a deno_bindgen function from the registry arg types.
+fn deno_bindgen_params(args: &[Arg]) -> Vec<String> {
+    args.iter()
+        .map(|a| {
+            let ty = match a.ty {
+                "boolean" => "u8",
+                _ => "&str",
+            };
+            format!("{}: {}", a.name, ty)
+        })
+        .collect()
+}
+
+/// Build the `(prelude, call_args)` for a deno_bindgen function: maps an empty
+/// optional `from` to `None`, booleans to `!= 0`.
+fn deno_bindgen_call(args: &[Arg]) -> (String, Vec<String>) {
+    let mut prelude = String::new();
+    let call_args = args
+        .iter()
+        .map(|a| match a.ty {
+            "boolean" => format!("{} != 0", a.name),
+            "string | null" => {
+                prelude.push_str(&format!(
+                    "    let {n} = if {n}.is_empty() {{ None }} else {{ Some({n}) }};\n",
+                    n = a.name
+                ));
+                a.name.to_string()
+            }
+            _ => a.name.to_string(),
+        })
+        .collect();
+    (prelude, call_args)
+}
+
+/// An async deno_bindgen function: `non_blocking` runs it on a worker thread so
+/// the generated TS returns a Promise. Delegates to the blocking `*_sync`.
+fn deno_bindgen_async_fn(s: &Symbol) -> String {
+    let params = deno_bindgen_params(s.args);
+    let (prelude, call_args) = deno_bindgen_call(s.args);
+    format!(
+        "#[deno_bindgen(non_blocking)]\npub fn aa_{}({}) -> String {{\n{}    tag(bind::{}_sync({}))\n}}\n\n",
+        s.name,
+        params.join(", "),
+        prelude,
+        s.name,
+        call_args.join(", ")
+    )
 }
 
 fn deno_bindgen_fn(s: &Symbol) -> String {

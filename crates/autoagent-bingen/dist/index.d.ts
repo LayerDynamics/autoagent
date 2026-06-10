@@ -26,3 +26,7 @@ export function configShow(root: string): string;
 export function memoryShow(root: string): MemorySummary;
 /** Registered plugin tools. */
 export function toolsList(root: string): string[];
+/** Supervised plan -> apply -> validate -> repair -> report. */
+export function run(root: string, objective: string, from: string | null, approve: boolean): Promise<RunOutcome>;
+/** Controlled self-authoring plan (apply is policy-gated). */
+export function evolve(root: string, objective: string, from: string | null, apply: boolean): Promise<EvolveOutcome>;

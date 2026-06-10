@@ -30,14 +30,18 @@ The crate is implemented (B1–B5). What differs from the original draft below:
   cdylib is built with `RUSTFLAGS="-C link-dead-code"`. R-2's deno_bindgen note
   also realized: its CLI can't locate `bindings.json` in a workspace+build.rs
   crate, so `deno/gen.ts` calls deno_bindgen's `codegen()` directly.
-- **FR-5 (async `run`/`evolve` as Promise/awaitable) is PARTIAL.** The sync
-  surface ships and is wired (`run_sync`/`evolve_sync`, plus `apply`/`revert`),
-  fully fail-closed. The async Promise/awaitable variants are an open item
-  tracked as B3-T6 — decoupled deliberately so async ergonomics never gate the
-  safety guarantees. **This is the one remaining MUST not yet met.**
-- **Safety-parity E2E covers `apply` (binding == real CLI, byte-identical patch).**
-  `evolve --apply` (self-authoring) parity is not yet covered by an E2E and is a
-  follow-up.
+- **FR-5 (async `run`/`evolve` as Promise/awaitable) is COMPLETE.** Both the
+  sync surface (`run_sync`/`evolve_sync` + `apply`/`revert`) and the async
+  variants ship: napi `pub async fn` → JS `Promise`, pyo3 `pyo3-async-runtimes`
+  `future_into_py` → Python awaitable, and deno_bindgen `non_blocking` → Promise.
+  Each delegates to the blocking `*_sync` wrapper on a worker thread (no nested
+  tokio runtime), verified at runtime (`__test__/async.test.mjs`,
+  `tests_py/test_async.py`, deno smoke). node-bindgen, RustPython, and the
+  raw-FFI `mod.ts` expose the sync variants only.
+- **Safety-parity E2E covers BOTH `apply` and `evolve --apply`** (binding ==
+  real CLI, byte-identical patch). `tests/parity_e2e.rs` (apply) and
+  `tests/evolve_parity_e2e.rs` (self-authoring evolve, incl. the
+  `allow_self_modification` fail-closed case).
 
 ---
 

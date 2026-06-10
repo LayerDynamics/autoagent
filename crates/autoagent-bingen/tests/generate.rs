@@ -85,8 +85,14 @@ fn mutating_sync_surface_emitted() {
     assert!(napi.contains("pub fn apply"));
     assert!(napi.contains("pub fn revert"));
     assert!(napi.contains("pub fn run_sync"));
-    // The async run/evolve must NOT be emitted yet (unwired — no lying stubs).
-    assert!(!out["dist/index.d.ts"].contains("export function run("));
+    // Async run/evolve are now wired: napi emits `pub async fn`, the .d.ts a Promise.
+    assert!(napi.contains("pub async fn run"));
+    assert!(napi.contains("pub async fn evolve"));
+    assert!(out["dist/index.d.ts"].contains("export function run("));
+    assert!(out["dist/index.d.ts"].contains("Promise<RunOutcome>"));
+    assert!(out["src/python/pyrs.rs"].contains("future_into_py"));
+    assert!(out["python/autoagent/__init__.pyi"].contains("async def run"));
+    assert!(out["src/deno/deno_bindgen.rs"].contains("non_blocking"));
 }
 
 #[test]
