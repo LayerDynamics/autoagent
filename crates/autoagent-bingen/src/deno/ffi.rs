@@ -77,6 +77,15 @@ pub unsafe extern "C" fn aa_revert(root: *const c_char, run_id: *const c_char) -
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn aa_replay(
+    root: *const c_char,
+    session_id: *const c_char,
+    approve: i32,
+) -> *mut c_char {
+    out(bind::replay(cs(root), cs(session_id), approve != 0))
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn aa_run_sync(
     root: *const c_char,
     objective: *const c_char,

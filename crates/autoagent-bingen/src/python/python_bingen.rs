@@ -62,6 +62,16 @@ mod autoagent {
     }
 
     #[pyfunction]
+    fn replay(
+        root: String,
+        session_id: String,
+        approve: bool,
+        vm: &VirtualMachine,
+    ) -> PyResult<String> {
+        bind::replay(&root, &session_id, approve).map_err(|e| err(e, vm))
+    }
+
+    #[pyfunction]
     fn run_sync(
         root: String,
         objective: String,

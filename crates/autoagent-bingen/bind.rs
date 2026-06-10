@@ -305,6 +305,25 @@ pub fn revert(root: &str, run_id: &str) -> BindResult {
     Ok(String::new())
 }
 
+/// Deterministically replay a recorded session — re-applies the run's recorded
+/// plans in order with NO model, reproducing the result. Returns a serialized
+/// `RunOutcome`. Mutating, so it resolves the approval gate up front like `run`.
+pub fn replay(root: &str, session_id: &str, approve: bool) -> BindResult {
+    let root = utf8(root)?;
+    let config = AutoAgentConfig::load(root)?;
+    let gate = gate_for(approve);
+    if config.agent.require_approval_before_write && !approve {
+        gate.confirm_write("replayed changes")
+            .map_err(BindError::from)?;
+    }
+    if config.agent.require_approval_before_command && !approve {
+        gate.confirm_command("replayed validation commands")
+            .map_err(BindError::from)?;
+    }
+    let outcome = autoagent_core::runtime::session::replay(root, session_id)?;
+    serde_json::to_string(&outcome).map_err(serde_err)
+}
+
 /// Supervised run (blocking): apply a plan (from `plan_path`) or generate one
 /// via the configured LLM, validate, bounded-repair, and report. Returns a
 /// serialized `RunOutcome`. Mirrors `commands::run`, including the up-front gate
@@ -507,6 +526,24 @@ pub static SURFACE: &[Symbol] = &[
         ],
         returns: "void",
         doc: "Revert a previous run.",
+    },
+    Symbol {
+        name: "replay",
+        kind: Kind::Sync,
+        privilege: Privilege::Mutate,
+        args: &[
+            S_ROOT,
+            Arg {
+                name: "session_id",
+                ty: "string",
+            },
+            Arg {
+                name: "approve",
+                ty: "boolean",
+            },
+        ],
+        returns: "RunOutcome",
+        doc: "Deterministically replay a recorded session, reproducing the run.",
     },
     // Blocking variants of the async run/evolve workflows (FR-5 `*_sync`).
     Symbol {

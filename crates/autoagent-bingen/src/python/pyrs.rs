@@ -41,6 +41,11 @@ fn revert(root: String, run_id: String) -> PyResult<()> {
 }
 
 #[pyfunction]
+fn replay(root: String, session_id: String, approve: bool) -> PyResult<String> {
+    bind::replay(&root, &session_id, approve).map_err(to_py)
+}
+
+#[pyfunction]
 fn run_sync(
     root: String,
     objective: String,
@@ -142,6 +147,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(init, m)?)?;
     m.add_function(wrap_pyfunction!(apply, m)?)?;
     m.add_function(wrap_pyfunction!(revert, m)?)?;
+    m.add_function(wrap_pyfunction!(replay, m)?)?;
     m.add_function(wrap_pyfunction!(run_sync, m)?)?;
     m.add_function(wrap_pyfunction!(evolve_sync, m)?)?;
     m.add_function(wrap_pyfunction!(patch_list, m)?)?;

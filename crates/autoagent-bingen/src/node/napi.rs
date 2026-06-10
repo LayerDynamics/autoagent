@@ -49,6 +49,12 @@ pub fn revert(root: String, run_id: String) -> napi::Result<()> {
     bind::revert(&root, &run_id).map(|_| ()).map_err(to_napi)
 }
 
+#[napi(js_name = "replay", ts_return_type = "RunOutcome")]
+pub fn replay(root: String, session_id: String, approve: bool) -> napi::Result<serde_json::Value> {
+    let j = bind::replay(&root, &session_id, approve).map_err(to_napi)?;
+    parse(j)
+}
+
 #[napi(js_name = "runSync", ts_return_type = "RunOutcome")]
 pub fn run_sync(
     root: String,

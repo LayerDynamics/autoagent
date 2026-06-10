@@ -23,6 +23,7 @@ const lib = Deno.dlopen(libPath, {
   aa_init: { parameters: ["pointer"], result: "pointer" },
   aa_apply: { parameters: ["pointer", "pointer", "i32"], result: "pointer" },
   aa_revert: { parameters: ["pointer", "pointer"], result: "pointer" },
+  aa_replay: { parameters: ["pointer", "pointer", "i32"], result: "pointer" },
   aa_run_sync: { parameters: ["pointer", "pointer", "pointer", "i32"], result: "pointer" },
   aa_evolve_sync: { parameters: ["pointer", "pointer", "pointer", "i32"], result: "pointer" },
   aa_patch_list: { parameters: ["pointer"], result: "pointer" },
@@ -96,6 +97,11 @@ export function apply(root: string, plan_path: string, approve: boolean): string
 export function revert(root: string, run_id: string): void {
   const body = unwrap(take(lib.symbols.aa_revert(ptr(cstr(root)), ptr(cstr(run_id)))));
   return;
+}
+
+export function replay(root: string, session_id: string, approve: boolean): RunOutcome {
+  const body = unwrap(take(lib.symbols.aa_replay(ptr(cstr(root)), ptr(cstr(session_id)), approve ? 1 : 0)));
+  return JSON.parse(body);
 }
 
 export function runSync(root: string, objective: string, from: string | null, approve: boolean): RunOutcome {

@@ -31,6 +31,7 @@ const WIRED: &[&str] = &[
     "tools_list",
     "apply",
     "revert",
+    "replay",
     "run_sync",
     "evolve_sync",
 ];
@@ -89,6 +90,19 @@ pub fn render_all() -> BTreeMap<String, String> {
     m.insert("../../sdk/python/autoagent/_models.py".into(), py_models());
     m.insert("../../sdk/node/src/_models.ts".into(), ts_models());
     m.insert("../../sdk/deno/_models.ts".into(), ts_models());
+    // High-level SDK sources (functional API + client) — generated from SURFACE.
+    m.insert(
+        "../../sdk/python/autoagent/__init__.py".into(),
+        py_sdk_init(),
+    );
+    m.insert(
+        "../../sdk/python/autoagent/client.py".into(),
+        py_sdk_client(),
+    );
+    m.insert("../../sdk/node/src/index.ts".into(), node_sdk_index());
+    m.insert("../../sdk/node/src/client.ts".into(), node_sdk_client());
+    m.insert("../../sdk/deno/mod.ts".into(), deno_sdk_mod());
+    m.insert("../../sdk/deno/client.ts".into(), deno_sdk_client());
     m.insert("package.json".into(), package_json());
     m.insert("deno.json".into(), deno_json());
     m.insert("dist/index.js".into(), node_loader_js());
@@ -534,6 +548,538 @@ fn ts_models() -> String {
         }
         out.push_str("}\n\n");
     }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// High-level SDK sources (functional API + client class) for Python, Node, and
+// Deno (S2–S4). Generated from the same SURFACE registry as the backends, so a
+// new symbol (e.g. `replay`) ripples into every SDK automatically and `bingen
+// check` guards them against drift. Only the thin `errors.*` shims and the
+// tests stay hand-written.
+// ---------------------------------------------------------------------------
+
+/// Wired sync symbols the SDK exposes, partitioned by privilege (SURFACE order).
+fn sdk_reads() -> Vec<&'static Symbol> {
+    wired_symbols()
+        .filter(|s| matches!(s.privilege, Privilege::Read))
+        .collect()
+}
+
+fn sdk_mutates() -> Vec<&'static Symbol> {
+    wired_symbols()
+        .filter(|s| matches!(s.privilege, Privilege::Mutate))
+        .collect()
+}
+
+/// SDK symbols exposed as `AutoAgent` client methods: every SDK symbol bar
+/// `version` (not workspace-scoped). When `with_async` is false (Deno's
+/// sync-only FFI) the awaitable run/evolve are omitted.
+fn client_symbols(with_async: bool) -> Vec<&'static Symbol> {
+    let mut v: Vec<&'static Symbol> = Vec::new();
+    v.extend(sdk_reads().into_iter().filter(|s| s.name != "version"));
+    v.extend(sdk_mutates());
+    if with_async {
+        v.extend(async_symbols());
+    }
+    v
+}
+
+/// `true` when the symbol returns a JSON model (dataclass/interface), as opposed
+/// to a scalar, void, raw string, or string array.
+fn returns_model(s: &Symbol) -> bool {
+    matches!(classify(s), Ret::Json) && !s.returns.ends_with("[]")
+}
+
+/// Distinct model return types over `syms`, sorted — the SDK's type imports.
+fn models_used(syms: &[&Symbol]) -> Vec<String> {
+    let mut set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for &s in syms {
+        if returns_model(s) {
+            set.insert(s.returns.to_string());
+        }
+    }
+    set.into_iter().collect()
+}
+
+/// All generated model type names (structs + enums), sorted — for re-export.
+fn model_names() -> Vec<String> {
+    model_defs().keys().cloned().collect()
+}
+
+// --- Python ----------------------------------------------------------------
+
+/// snake arg name, with the `from` keyword escaped to `from_`.
+fn py_arg(a: &Arg) -> String {
+    if a.name == "from" {
+        "from_".to_string()
+    } else {
+        a.name.to_string()
+    }
+}
+
+/// Python signature body: positional args, then keyword-only booleans.
+fn py_sig(args: &[Arg]) -> String {
+    let mut pos: Vec<String> = Vec::new();
+    let mut kw: Vec<String> = Vec::new();
+    for a in args {
+        match a.ty {
+            "boolean" => kw.push(format!("{}: bool = False", a.name)),
+            "string | null" => pos.push(format!("{}: Optional[str] = None", py_arg(a))),
+            _ => pos.push(format!("{}: str", py_arg(a))),
+        }
+    }
+    if !kw.is_empty() {
+        pos.push("*".to_string());
+        pos.extend(kw);
+    }
+    pos.join(", ")
+}
+
+/// SDK return annotation: the typed model/list (vs. the raw native `str`).
+fn py_sdk_ret(s: &Symbol) -> String {
+    match classify(s) {
+        Ret::Number => "int".into(),
+        Ret::Boolean => "bool".into(),
+        Ret::Void => "None".into(),
+        Ret::Str => "str".into(),
+        Ret::Json if s.returns.ends_with("[]") => "list[str]".into(),
+        Ret::Json => s.returns.to_string(),
+    }
+}
+
+/// One functional-API `def` for a sync symbol.
+fn py_fn(s: &Symbol) -> String {
+    let args: Vec<String> = s.args.iter().map(py_arg).collect();
+    // `_call(_native.fn, a, b)`; version is infallible so it skips `_call`.
+    let tail = if args.is_empty() {
+        String::new()
+    } else {
+        format!(", {}", args.join(", "))
+    };
+    let body = match classify(s) {
+        Ret::Number => format!("    return _native.{}({})\n", s.name, args.join(", ")),
+        Ret::Boolean | Ret::Str => format!("    return _call(_native.{}{})\n", s.name, tail),
+        Ret::Void => format!("    _call(_native.{}{})\n", s.name, tail),
+        Ret::Json if s.returns.ends_with("[]") => {
+            format!("    return json.loads(_call(_native.{}{}))\n", s.name, tail)
+        }
+        Ret::Json => format!(
+            "    return {}.from_dict(json.loads(_call(_native.{}{})))\n",
+            s.returns, s.name, tail
+        ),
+    };
+    format!(
+        "def {}({}) -> {}:\n    \"\"\"{}\"\"\"\n{}\n\n",
+        s.name,
+        py_sig(s.args),
+        py_sdk_ret(s),
+        s.doc,
+        body
+    )
+}
+
+/// One functional-API `async def` (awaitable run/evolve).
+fn py_async_fn(s: &Symbol) -> String {
+    let args: Vec<String> = s.args.iter().map(py_arg).collect();
+    format!(
+        "async def {name}({sig}) -> {ret}:\n    \"\"\"{doc}\"\"\"\n    try:\n        out = await _native.{name}({call})\n    except AutoAgentError:\n        raise\n    except Exception as e:\n        raise AutoAgentError.from_native(e) from None\n    return {ret}.from_dict(json.loads(out))\n\n\n",
+        name = s.name,
+        sig = py_sig(s.args),
+        ret = s.returns,
+        doc = s.doc,
+        call = args.join(", ")
+    )
+}
+
+/// One client method: drops the leading `root`, forwards to the functional fn.
+fn py_method(s: &Symbol) -> String {
+    let rest = &s.args[1..];
+    let mut pos: Vec<String> = vec!["self".to_string()];
+    let mut kw: Vec<String> = Vec::new();
+    for a in rest {
+        match a.ty {
+            "boolean" => kw.push(format!("{}: bool = False", a.name)),
+            "string | null" => pos.push(format!("{}: Optional[str] = None", py_arg(a))),
+            _ => pos.push(format!("{}: str", py_arg(a))),
+        }
+    }
+    if !kw.is_empty() {
+        pos.push("*".to_string());
+        pos.extend(kw);
+    }
+    let sig = pos.join(", ");
+    let mut call: Vec<String> = vec!["self.root".to_string()];
+    for a in rest {
+        match a.ty {
+            "boolean" => call.push(format!("{}={}", a.name, a.name)),
+            _ => call.push(py_arg(a)),
+        }
+    }
+    let call = call.join(", ");
+    let ret = py_sdk_ret(s);
+    if matches!(s.kind, Kind::Async) {
+        format!(
+            "    async def {n}({sig}) -> {ret}:\n        return await {n}({call})\n\n",
+            n = s.name
+        )
+    } else if matches!(classify(s), Ret::Void) {
+        format!(
+            "    def {n}({sig}) -> {ret}:\n        {n}({call})\n\n",
+            n = s.name
+        )
+    } else {
+        format!(
+            "    def {n}({sig}) -> {ret}:\n        return {n}({call})\n\n",
+            n = s.name
+        )
+    }
+}
+
+fn py_sdk_init() -> String {
+    let mut out = String::new();
+    out.push_str("# DO NOT EDIT — generated by autoagent-bingen from bind.rs.\n");
+    out.push_str(
+        r#""""AutoAgent — typed Python SDK over the native bindings.
+
+The native pyo3 extension (``autoagent._native``) returns JSON strings; this
+module parses them into the generated typed models and maps native errors to
+:class:`AutoAgentError`. Both a functional API (``autoagent.doctor(root)``) and
+the :class:`AutoAgent` client class are provided. Mutating operations preserve
+the engine's fail-closed safety: an unapproved op raises ``AutoAgentError``.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Optional
+
+from . import _native
+"#,
+    );
+    out.push_str("from ._models import (\n");
+    for m in &model_names() {
+        out.push_str(&format!("    {m},\n"));
+    }
+    out.push_str(")\n");
+    out.push_str("from .errors import AutoAgentError\n\n");
+
+    // __all__: client class, error, models, then functions — fully sorted.
+    let mut all: Vec<String> = vec!["AutoAgent".into(), "AutoAgentError".into()];
+    all.extend(model_names());
+    for s in wired_symbols().chain(async_symbols()) {
+        all.push(s.name.to_string());
+    }
+    all.sort();
+    out.push_str("__all__ = [\n");
+    for a in &all {
+        out.push_str(&format!("    \"{a}\",\n"));
+    }
+    out.push_str("]\n\n\n");
+
+    out.push_str(
+        r#"def _call(fn, *args):
+    """Invoke a native function, re-raising native errors as AutoAgentError."""
+    try:
+        return fn(*args)
+    except AutoAgentError:
+        raise
+    except Exception as e:  # native _native.AutoAgentError or anything else
+        raise AutoAgentError.from_native(e) from None
+
+
+"#,
+    );
+
+    out.push_str(
+        "# --- read surface ---------------------------------------------------------\n\n",
+    );
+    for s in sdk_reads() {
+        out.push_str(&py_fn(s));
+    }
+    out.push_str(
+        "# --- mutating surface (fail-closed) ---------------------------------------\n\n",
+    );
+    for s in sdk_mutates() {
+        out.push_str(&py_fn(s));
+    }
+    for s in async_symbols() {
+        out.push_str(&py_async_fn(s));
+    }
+    out.push_str("from .client import AutoAgent  # noqa: E402  (depends on the functions above)\n");
+    out
+}
+
+fn py_sdk_client() -> String {
+    let syms = client_symbols(true);
+    let mut out = String::new();
+    out.push_str("# DO NOT EDIT — generated by autoagent-bingen from bind.rs.\n");
+    out.push_str(
+        r#""""The ``AutoAgent`` client class — sugar over the functional API that holds the
+workspace root so callers pass it once."""
+
+from __future__ import annotations
+
+from typing import Optional
+
+from . import (
+"#,
+    );
+    let mut fns: Vec<String> = syms.iter().map(|s| s.name.to_string()).collect();
+    fns.sort();
+    for f in &fns {
+        out.push_str(&format!("    {f},\n"));
+    }
+    out.push_str(")\n");
+    out.push_str("from ._models import (\n");
+    for m in &models_used(&syms) {
+        out.push_str(&format!("    {m},\n"));
+    }
+    out.push_str(")\n\n\n");
+    out.push_str("class AutoAgent:\n");
+    out.push_str("    \"\"\"A workspace-scoped client. ``AutoAgent('/repo').doctor()``.\"\"\"\n\n");
+    out.push_str("    def __init__(self, root: str) -> None:\n        self.root = root\n\n");
+    for &s in &syms {
+        out.push_str(&py_method(s));
+    }
+    out
+}
+
+// --- TypeScript (Node + Deno) ----------------------------------------------
+
+/// TS functional signature (camelCase args, defaults for nullable/bool).
+fn ts_sig(args: &[Arg]) -> String {
+    args.iter()
+        .map(|a| match a.ty {
+            "boolean" => format!("{} = false", camel(a.name)),
+            "string | null" => format!("{}: string | null = null", camel(a.name)),
+            _ => format!("{}: string", camel(a.name)),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn ts_call(args: &[Arg]) -> String {
+    args.iter()
+        .map(|a| camel(a.name))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn ts_ret(s: &Symbol) -> String {
+    match classify(s) {
+        Ret::Number => "number".into(),
+        Ret::Boolean => "boolean".into(),
+        Ret::Void => "void".into(),
+        Ret::Str => "string".into(),
+        Ret::Json if s.returns.ends_with("[]") => "string[]".into(),
+        Ret::Json => s.returns.to_string(),
+    }
+}
+
+/// One Node functional export. napi returns parsed objects, so model returns are
+/// cast (`as T`) rather than JSON-parsed; `version` is infallible (no `wrap`).
+fn node_fn(s: &Symbol) -> String {
+    let js = camel(s.name);
+    let call = format!("native.{}({})", js, ts_call(s.args));
+    let body = match classify(s) {
+        Ret::Number => format!("  return {call};\n"),
+        Ret::Void => format!("  wrap(() => {call});\n"),
+        _ if returns_model(s) => format!("  return wrap(() => {call}) as {};\n", s.returns),
+        _ => format!("  return wrap(() => {call});\n"),
+    };
+    format!(
+        "/** {doc} */\nexport function {js}({sig}): {ret} {{\n{body}}}\n\n",
+        doc = s.doc,
+        js = js,
+        sig = ts_sig(s.args),
+        ret = ts_ret(s),
+        body = body
+    )
+}
+
+/// One Node awaitable export (run/evolve): worker-thread Promise + error map.
+fn node_async_fn(s: &Symbol) -> String {
+    let js = camel(s.name);
+    let call = format!("native.{}({})", js, ts_call(s.args));
+    format!(
+        "/** {doc} */\nexport async function {js}({sig}): Promise<{ret}> {{\n  try {{\n    return (await {call}) as {ret};\n  }} catch (e) {{\n    throw AutoAgentError.fromNative(e);\n  }}\n}}\n\n",
+        doc = s.doc,
+        js = js,
+        sig = ts_sig(s.args),
+        ret = s.returns,
+        call = call
+    )
+}
+
+/// One client method (Node/Deno share the shape; the call target is the
+/// imported camelCase function). Drops the leading `root` arg.
+fn ts_method(s: &Symbol) -> String {
+    let js = camel(s.name);
+    let rest = &s.args[1..];
+    let sig = ts_sig(rest);
+    let mut call: Vec<String> = vec!["this.root".to_string()];
+    call.extend(rest.iter().map(|a| camel(a.name)));
+    let call = call.join(", ");
+    let ret = if matches!(s.kind, Kind::Async) {
+        format!("Promise<{}>", s.returns)
+    } else {
+        ts_ret(s)
+    };
+    if matches!(classify(s), Ret::Void) {
+        format!("  {js}({sig}): {ret} {{\n    {js}({call});\n  }}\n")
+    } else {
+        format!("  {js}({sig}): {ret} {{\n    return {js}({call});\n  }}\n")
+    }
+}
+
+fn node_sdk_index() -> String {
+    let mut all_syms: Vec<&Symbol> = sdk_reads();
+    all_syms.extend(sdk_mutates());
+    all_syms.extend(async_symbols());
+    let mut out = String::new();
+    out.push_str("// DO NOT EDIT — generated by autoagent-bingen from bind.rs.\n");
+    out.push_str(
+        r#"// AutoAgent — typed Node.js SDK over the native bindings (@autoagent/native).
+// The native binding returns parsed objects (napi) and throws `[code|exitCode]`
+// errors; this layer types the results with the generated models and maps
+// errors to AutoAgentError. Mutating ops preserve fail-closed safety.
+
+import nativeDefault from "@autoagent/native";
+import { AutoAgentError } from "./errors.js";
+import type {
+"#,
+    );
+    for m in &models_used(&all_syms) {
+        out.push_str(&format!("  {m},\n"));
+    }
+    out.push_str("} from \"./_models.js\";\n\n");
+    out.push_str(
+        r#"export * from "./_models.js";
+export { AutoAgentError };
+export { AutoAgent } from "./client.js";
+
+// @autoagent/native is the runtime bridge; the SDK supplies the real types via
+// the generated models, so the native is consumed loosely and cast.
+// deno-lint-ignore no-explicit-any
+const native = nativeDefault as any;
+
+function wrap<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (e) {
+    throw AutoAgentError.fromNative(e);
+  }
+}
+
+"#,
+    );
+    out.push_str(
+        "// --- read surface ---------------------------------------------------------\n\n",
+    );
+    for s in sdk_reads() {
+        out.push_str(&node_fn(s));
+    }
+    out.push_str(
+        "// --- mutating surface (fail-closed) ---------------------------------------\n\n",
+    );
+    for s in sdk_mutates() {
+        out.push_str(&node_fn(s));
+    }
+    for s in async_symbols() {
+        out.push_str(&node_async_fn(s));
+    }
+    out
+}
+
+fn node_sdk_client() -> String {
+    let syms = client_symbols(true);
+    let mut out = String::new();
+    out.push_str("// DO NOT EDIT — generated by autoagent-bingen from bind.rs.\n");
+    out.push_str(
+        "// The AutoAgent client class — sugar over the functional API that holds the\n\
+         // workspace root so callers pass it once.\n\n",
+    );
+    let mut fns: Vec<String> = syms.iter().map(|s| camel(s.name)).collect();
+    fns.sort();
+    out.push_str("import {\n");
+    for f in &fns {
+        out.push_str(&format!("  {f},\n"));
+    }
+    out.push_str("} from \"./index.js\";\n");
+    out.push_str("import type {\n");
+    for m in &models_used(&syms) {
+        out.push_str(&format!("  {m},\n"));
+    }
+    out.push_str("} from \"./_models.js\";\n\n");
+    out.push_str("/** A workspace-scoped client. `new AutoAgent('/repo').doctor()`. */\n");
+    out.push_str("export class AutoAgent {\n");
+    out.push_str("  constructor(public readonly root: string) {}\n\n");
+    for &s in &syms {
+        out.push_str(&ts_method(s));
+    }
+    out.push_str("}\n");
+    out
+}
+
+fn deno_sdk_mod() -> String {
+    let mut camels: Vec<String> = wired_symbols().map(|s| camel(s.name)).collect();
+    camels.sort();
+    let mut out = String::new();
+    out.push_str("// DO NOT EDIT — generated by autoagent-bingen from bind.rs.\n");
+    out.push_str(
+        r#"// AutoAgent — typed Deno SDK over the native FFI binding.
+//
+// The native binding (`@autoagent/native`) already returns typed models and
+// throws `AutoAgentError`; this module re-exports that functional API with the
+// SDK's models + error type and adds the `AutoAgent` client class. Requires
+// --allow-ffi (and --allow-read/--allow-write for mutating ops); set
+// AUTOAGENT_BINGEN_LIB to the built cdylib.
+//
+// NOTE: the FFI binding is synchronous; this SDK surfaces the `*Sync` workflow
+// entrypoints (awaitable run/evolve are available via the deno_bindgen path).
+
+export * from "./_models.ts";
+export { AutoAgentError } from "./errors.ts";
+export { AutoAgent } from "./client.ts";
+
+export {
+"#,
+    );
+    for c in &camels {
+        out.push_str(&format!("  {c},\n"));
+    }
+    out.push_str("} from \"../../crates/autoagent-bingen/deno/mod.ts\";\n");
+    out
+}
+
+fn deno_sdk_client() -> String {
+    let syms = client_symbols(false);
+    let mut camels: Vec<String> = syms.iter().map(|s| camel(s.name)).collect();
+    camels.sort();
+    let mut out = String::new();
+    out.push_str("// DO NOT EDIT — generated by autoagent-bingen from bind.rs.\n");
+    out.push_str(
+        "// The AutoAgent client class — sugar over the native functional API that holds\n\
+         // the workspace root so callers pass it once.\n\n",
+    );
+    out.push_str("import {\n");
+    for c in &camels {
+        out.push_str(&format!("  {c},\n"));
+    }
+    out.push_str("} from \"../../crates/autoagent-bingen/deno/mod.ts\";\n");
+    out.push_str("import type {\n");
+    for m in &models_used(&syms) {
+        out.push_str(&format!("  {m},\n"));
+    }
+    out.push_str("} from \"./_models.ts\";\n\n");
+    out.push_str("/** A workspace-scoped client. `new AutoAgent('/repo').doctor()`. */\n");
+    out.push_str("export class AutoAgent {\n");
+    out.push_str("  constructor(public readonly root: string) {}\n\n");
+    for &s in &syms {
+        out.push_str(&ts_method(s));
+    }
+    out.push_str("}\n");
     out
 }
 

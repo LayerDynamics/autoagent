@@ -12,6 +12,8 @@ export function init(root: string): boolean;
 export function apply(root: string, plan_path: string, approve: boolean): string;
 /** Revert a previous run. */
 export function revert(root: string, run_id: string): void;
+/** Deterministically replay a recorded session, reproducing the run. */
+export function replay(root: string, session_id: string, approve: boolean): RunOutcome;
 /** Supervised run (blocking) from a plan or generated objective. */
 export function runSync(root: string, objective: string, from: string | null, approve: boolean): RunOutcome;
 /** Controlled self-authoring (blocking). */

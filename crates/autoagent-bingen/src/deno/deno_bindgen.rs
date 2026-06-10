@@ -45,6 +45,11 @@ pub fn aa_revert(root: &str, run_id: &str) -> String {
 }
 
 #[deno_bindgen]
+pub fn aa_replay(root: &str, session_id: &str, approve: u8) -> String {
+    tag(bind::replay(root, session_id, approve != 0))
+}
+
+#[deno_bindgen]
 pub fn aa_run_sync(root: &str, objective: &str, from: &str, approve: u8) -> String {
     let from = if from.is_empty() { None } else { Some(from) };
     tag(bind::run_sync(root, objective, from, approve != 0))

@@ -65,6 +65,11 @@ fn revert(root: String, run_id: String) -> String {
     tag(bind::revert(&root, &run_id))
 }
 
+#[node_bindgen(name = "replay")]
+fn replay(root: String, session_id: String, approve: bool) -> String {
+    tag(bind::replay(&root, &session_id, approve))
+}
+
 #[node_bindgen(name = "runSync")]
 fn run_sync(root: String, objective: String, from: Option<String>, approve: bool) -> String {
     tag(bind::run_sync(&root, &objective, from.as_deref(), approve))
