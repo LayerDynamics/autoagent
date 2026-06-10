@@ -27,6 +27,8 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Test
-        run: cargo test --workspace
+        # --no-fail-fast so a single failing test binary doesn't mask failures
+        # in later binaries (notably platform-specific ones on the Windows leg).
+        run: cargo test --workspace --no-fail-fast
       - name: Build (release)
         run: cargo build --release

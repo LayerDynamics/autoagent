@@ -164,12 +164,14 @@ fn grep(root: &Utf8Path, pattern: &str, redactor: &Redactor) -> String {
         };
         for entry in rd.filter_map(|e| e.ok()) {
             let path = entry.path();
+            // Emit workspace-relative paths with `/` separators so grep output is
+            // identical across platforms (Windows `strip_prefix` yields `\`).
             let rel = path
                 .strip_prefix(&real_root)
                 .ok()
                 .and_then(|p| p.to_str())
                 .unwrap_or("")
-                .to_string();
+                .replace('\\', "/");
             if rel.is_empty() || redactor.is_excluded(&rel) {
                 continue;
             }

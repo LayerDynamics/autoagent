@@ -161,15 +161,18 @@ fn read_bounded(
         if rel.is_empty() || !seen.insert(rel.to_string()) || redactor.is_excluded(rel) {
             continue;
         }
-        let abs = match std::fs::canonicalize(real_root.join(rel).as_std_path()) {
-            Ok(p) => p,
-            Err(_) => continue, // missing path
+        // Resolve to the de-verbatimed absolute path so the containment check
+        // matches the de-verbatimed `real_root` on Windows (a raw verbatim
+        // `\\?\C:\…` would fail `starts_with` and silently drop the file).
+        let abs = match crate::safety::path_guard::canonicalize_existing(&real_root.join(rel)) {
+            Some(p) => p,
+            None => continue, // missing path
         };
         // Never read outside the workspace (defense against `../` escapes).
-        if !abs.starts_with(real_root.as_std_path()) || !abs.is_file() {
+        if !abs.starts_with(&real_root) || !abs.as_std_path().is_file() {
             continue;
         }
-        let content = match std::fs::read_to_string(&abs) {
+        let content = match std::fs::read_to_string(abs.as_std_path()) {
             Ok(c) if c.len() <= MAX_FILE_BYTES => c,
             _ => continue, // binary, unreadable, or oversized
         };

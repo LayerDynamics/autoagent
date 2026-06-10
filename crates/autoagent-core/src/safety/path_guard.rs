@@ -74,7 +74,7 @@ impl PathGuard {
 /// `\\srv\sh`. Verbatim paths treat `/` as a literal character rather than a
 /// separator, which breaks lexical path reasoning; the simplified form parses
 /// normally. No-op on Unix and on already-plain paths (string never matches).
-fn simplify_verbatim(p: &Utf8Path) -> Utf8PathBuf {
+pub(crate) fn simplify_verbatim(p: &Utf8Path) -> Utf8PathBuf {
     let s = p.as_str();
     if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
         Utf8PathBuf::from(format!(r"\\{rest}"))
@@ -93,11 +93,20 @@ fn simplify_verbatim(p: &Utf8Path) -> Utf8PathBuf {
 /// which verbatim paths disable. Stripping the prefix here keeps the whole
 /// runtime on plain paths.
 pub(crate) fn canonical_root(root: &Utf8Path) -> Utf8PathBuf {
-    let real = std::fs::canonicalize(root.as_std_path())
-        .ok()
-        .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
-        .unwrap_or_else(|| root.to_path_buf());
-    simplify_verbatim(&real)
+    canonicalize_existing(root).unwrap_or_else(|| simplify_verbatim(root))
+}
+
+/// Canonicalize an existing path to its absolute, **de-verbatimed** form
+/// (resolves `..`/symlinks via the OS). Returns `None` when the path is not on
+/// disk or not valid UTF-8. Use this — never bare `std::fs::canonicalize` —
+/// wherever a resolved child path is compared against a [`canonical_root`]:
+/// `std::fs::canonicalize` yields a `\\?\` verbatim path on Windows, and a
+/// `VerbatimDisk` prefix never `starts_with` a plain `Disk` prefix, so a raw
+/// result silently fails containment against the de-verbatimed root.
+pub(crate) fn canonicalize_existing(p: &Utf8Path) -> Option<Utf8PathBuf> {
+    let real = std::fs::canonicalize(p.as_std_path()).ok()?;
+    let utf8 = Utf8PathBuf::from_path_buf(real).ok()?;
+    Some(simplify_verbatim(&utf8))
 }
 
 /// Lexically normalize a path, preserving a leading root, without touching disk.
