@@ -96,6 +96,29 @@ fn mutating_sync_surface_emitted() {
 }
 
 #[test]
+fn sdk_models_generated() {
+    let out = gen::render_all();
+    let py = out
+        .get("../../sdk/python/autoagent/_models.py")
+        .expect("python models generated");
+    assert!(py.contains("@dataclass"));
+    assert!(py.contains("class DoctorReport"));
+    assert!(py.contains("class Check"));
+    assert!(py.contains("def from_dict"));
+    // nested + optional + enum handling
+    assert!(py.contains("RunState = "), "enum alias missing");
+    assert!(py.contains("Optional["), "optional field missing");
+    assert!(py.contains("Check.from_dict"), "nested from_dict missing");
+
+    let ts = out
+        .get("../../sdk/node/src/_models.ts")
+        .expect("ts models generated");
+    assert!(ts.contains("export interface RunOutcome"));
+    assert!(ts.contains("export interface DoctorReport"));
+    assert!(ts.contains("export type RunState ="));
+}
+
+#[test]
 fn models_schema_emitted() {
     let out = gen::render_all();
     let s = out

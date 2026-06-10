@@ -85,6 +85,9 @@ pub fn render_all() -> BTreeMap<String, String> {
     m.insert("python/autoagent/__init__.pyi".into(), pyi());
     m.insert("schema/surface.schema.json".into(), schema_json());
     m.insert("schema/models.schema.json".into(), models_schema());
+    m.insert("../../sdk/python/autoagent/_models.py".into(), py_models());
+    m.insert("../../sdk/node/src/_models.ts".into(), ts_models());
+    m.insert("../../sdk/deno/_models.ts".into(), ts_models());
     m.insert("package.json".into(), package_json());
     m.insert("deno.json".into(), deno_json());
     m.insert("dist/index.js".into(), node_loader_js());
@@ -282,8 +285,14 @@ fn models_schema() -> String {
             );
         };
     }
-    add!(autoagent_core::runtime::doctor::DoctorReport, "DoctorReport");
-    add!(autoagent_core::runtime::run_workflow::RunOutcome, "RunOutcome");
+    add!(
+        autoagent_core::runtime::doctor::DoctorReport,
+        "DoctorReport"
+    );
+    add!(
+        autoagent_core::runtime::run_workflow::RunOutcome,
+        "RunOutcome"
+    );
     add!(
         autoagent_core::runtime::evolve_workflow::EvolveOutcome,
         "EvolveOutcome"
@@ -292,9 +301,239 @@ fn models_schema() -> String {
         autoagent_core::analysis::project_analysis::ProjectAnalysis,
         "ProjectAnalysis"
     );
-    add!(autoagent_core::memory::summary::MemorySummary, "MemorySummary");
+    add!(
+        autoagent_core::memory::summary::MemorySummary,
+        "MemorySummary"
+    );
     let doc = serde_json::json!({ "version": "1.0.0", "models": defs });
     serde_json::to_string_pretty(&doc).expect("models schema") + "\n"
+}
+
+// ---------------------------------------------------------------------------
+// SDK model codegen (S1-T4): flatten the model schemas into one type map and
+// emit idiomatic Python dataclasses (+ from_dict) and TS interfaces. The SDK
+// wrappers (sdk/{python,node,deno}) consume these so the public API is typed.
+// ---------------------------------------------------------------------------
+
+/// Flatten every boundary model + its nested `$defs` into one `name -> schema`
+/// map (deduped). Derived from the same `JsonSchema` impls as `models_schema`.
+fn model_defs() -> BTreeMap<String, serde_json::Value> {
+    use schemars::schema_for;
+    let mut types: BTreeMap<String, serde_json::Value> = BTreeMap::new();
+    macro_rules! collect {
+        ($t:ty, $name:expr) => {{
+            let v = serde_json::to_value(schema_for!($t)).expect("schema");
+            if let Some(defs) = v.get("$defs").and_then(|d| d.as_object()) {
+                for (k, dv) in defs {
+                    types.entry(k.clone()).or_insert_with(|| dv.clone());
+                }
+            }
+            let mut root = v;
+            if let Some(o) = root.as_object_mut() {
+                o.remove("$defs");
+                o.remove("$schema");
+            }
+            types.entry($name.to_string()).or_insert(root);
+        }};
+    }
+    collect!(
+        autoagent_core::runtime::doctor::DoctorReport,
+        "DoctorReport"
+    );
+    collect!(
+        autoagent_core::runtime::run_workflow::RunOutcome,
+        "RunOutcome"
+    );
+    collect!(
+        autoagent_core::runtime::evolve_workflow::EvolveOutcome,
+        "EvolveOutcome"
+    );
+    collect!(
+        autoagent_core::analysis::project_analysis::ProjectAnalysis,
+        "ProjectAnalysis"
+    );
+    collect!(
+        autoagent_core::memory::summary::MemorySummary,
+        "MemorySummary"
+    );
+    types
+}
+
+fn is_struct(name: &str, types: &BTreeMap<String, serde_json::Value>) -> bool {
+    types
+        .get(name)
+        .map(|s| s.get("properties").is_some())
+        .unwrap_or(false)
+}
+
+fn ref_name(schema: &serde_json::Value) -> Option<String> {
+    schema
+        .get("$ref")
+        .and_then(|r| r.as_str())
+        .map(|r| r.rsplit('/').next().unwrap().to_string())
+}
+
+/// `(base_type_or_null, nullable)` from a schema's `type` field.
+fn type_base(schema: &serde_json::Value) -> (Option<String>, bool) {
+    match schema.get("type") {
+        Some(serde_json::Value::String(s)) => (Some(s.clone()), false),
+        Some(serde_json::Value::Array(a)) => {
+            let base = a
+                .iter()
+                .filter_map(|v| v.as_str())
+                .find(|s| *s != "null")
+                .map(|s| s.to_string());
+            let nullable = a.iter().any(|v| v.as_str() == Some("null"));
+            (base, nullable)
+        }
+        _ => (None, false),
+    }
+}
+
+/// Resolve a property schema to `(python_type, ts_type)`.
+fn resolve_type(schema: &serde_json::Value) -> (String, String) {
+    if let Some(name) = ref_name(schema) {
+        return (name.clone(), name);
+    }
+    if let Some(any) = schema.get("anyOf").and_then(|x| x.as_array()) {
+        if let Some(inner) = any
+            .iter()
+            .find(|s| s.get("type").and_then(|t| t.as_str()) != Some("null"))
+        {
+            let (p, t) = resolve_type(inner);
+            return (format!("Optional[{p}]"), format!("{t} | null"));
+        }
+    }
+    let (base, nullable) = type_base(schema);
+    let (p, t) = match base.as_deref() {
+        Some("string") => ("str".to_string(), "string".to_string()),
+        Some("integer") => ("int".to_string(), "number".to_string()),
+        Some("number") => ("float".to_string(), "number".to_string()),
+        Some("boolean") => ("bool".to_string(), "boolean".to_string()),
+        Some("array") => {
+            let items = schema
+                .get("items")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            let (ip, it) = resolve_type(&items);
+            (format!("list[{ip}]"), format!("{it}[]"))
+        }
+        _ => ("Any".to_string(), "unknown".to_string()),
+    };
+    if nullable {
+        (format!("Optional[{p}]"), format!("{t} | null"))
+    } else {
+        (p, t)
+    }
+}
+
+/// Python construction expression to turn `access` (a parsed JSON value) into
+/// the typed field value, recursing into nested dataclasses / lists.
+fn py_construct(
+    access: &str,
+    schema: &serde_json::Value,
+    types: &BTreeMap<String, serde_json::Value>,
+) -> String {
+    if let Some(name) = ref_name(schema) {
+        if is_struct(&name, types) {
+            return format!("{name}.from_dict({access})");
+        }
+        return access.to_string(); // enum literal — passthrough
+    }
+    if let Some(any) = schema.get("anyOf").and_then(|x| x.as_array()) {
+        if let Some(inner) = any
+            .iter()
+            .find(|s| s.get("type").and_then(|t| t.as_str()) != Some("null"))
+        {
+            if let Some(name) = ref_name(inner) {
+                if is_struct(&name, types) {
+                    return format!(
+                        "({name}.from_dict({access}) if {access} is not None else None)"
+                    );
+                }
+            }
+        }
+        return access.to_string();
+    }
+    let (base, _) = type_base(schema);
+    if base.as_deref() == Some("array") {
+        let items = schema
+            .get("items")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        if let Some(name) = ref_name(&items) {
+            if is_struct(&name, types) {
+                return format!("[{name}.from_dict(_x) for _x in {access}]");
+            }
+        }
+    }
+    access.to_string()
+}
+
+fn py_models() -> String {
+    let types = model_defs();
+    let mut out =
+        String::from("# DO NOT EDIT — generated by autoagent-bingen from core JsonSchema.\n");
+    out.push_str("from __future__ import annotations\nfrom dataclasses import dataclass\nfrom typing import Any, Literal, Optional\n\n");
+    for (name, schema) in &types {
+        if let Some(en) = schema.get("enum").and_then(|e| e.as_array()) {
+            let variants: Vec<String> = en
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| format!("\"{s}\""))
+                .collect();
+            out.push_str(&format!("{name} = Literal[{}]\n\n", variants.join(", ")));
+            continue;
+        }
+        let Some(props) = schema.get("properties").and_then(|p| p.as_object()) else {
+            continue;
+        };
+        out.push_str(&format!("@dataclass\nclass {name}:\n"));
+        for (field, fschema) in props {
+            let (py, _) = resolve_type(fschema);
+            out.push_str(&format!("    {field}: {py}\n"));
+        }
+        out.push_str("\n    @classmethod\n    def from_dict(cls, d: dict[str, Any]) -> \"");
+        out.push_str(name);
+        out.push_str("\":\n        return cls(\n");
+        for (field, fschema) in props {
+            let access = format!("d.get(\"{field}\")");
+            let expr = py_construct(&access, fschema, &types);
+            out.push_str(&format!("            {field}={expr},\n"));
+        }
+        out.push_str("        )\n\n");
+    }
+    out
+}
+
+fn ts_models() -> String {
+    let types = model_defs();
+    let mut out =
+        String::from("// DO NOT EDIT — generated by autoagent-bingen from core JsonSchema.\n");
+    for (name, schema) in &types {
+        if let Some(en) = schema.get("enum").and_then(|e| e.as_array()) {
+            let variants: Vec<String> = en
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| format!("\"{s}\""))
+                .collect();
+            out.push_str(&format!(
+                "export type {name} = {};\n\n",
+                variants.join(" | ")
+            ));
+            continue;
+        }
+        let Some(props) = schema.get("properties").and_then(|p| p.as_object()) else {
+            continue;
+        };
+        out.push_str(&format!("export interface {name} {{\n"));
+        for (field, fschema) in props {
+            let (_, ts) = resolve_type(fschema);
+            out.push_str(&format!("  {field}: {ts};\n"));
+        }
+        out.push_str("}\n\n");
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
