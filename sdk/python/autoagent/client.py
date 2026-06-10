@@ -1,0 +1,81 @@
+"""The ``AutoAgent`` client class — sugar over the functional API that holds the
+workspace root so callers pass it once."""
+
+from __future__ import annotations
+
+from typing import Optional
+
+from . import (
+    analyze,
+    apply,
+    config_show,
+    doctor,
+    evolve,
+    evolve_sync,
+    init,
+    memory_show,
+    patch_list,
+    patch_show,
+    revert,
+    run,
+    run_sync,
+    tools_list,
+)
+from ._models import DoctorReport, EvolveOutcome, MemorySummary, ProjectAnalysis, RunOutcome
+
+
+class AutoAgent:
+    """A workspace-scoped client. ``AutoAgent('/repo').doctor()``."""
+
+    def __init__(self, root: str) -> None:
+        self.root = root
+
+    def doctor(self) -> DoctorReport:
+        return doctor(self.root)
+
+    def analyze(self) -> ProjectAnalysis:
+        return analyze(self.root)
+
+    def config_show(self) -> str:
+        return config_show(self.root)
+
+    def patch_list(self) -> list[str]:
+        return patch_list(self.root)
+
+    def patch_show(self, run_id: str) -> str:
+        return patch_show(self.root, run_id)
+
+    def memory_show(self) -> MemorySummary:
+        return memory_show(self.root)
+
+    def tools_list(self) -> list[str]:
+        return tools_list(self.root)
+
+    def init(self) -> bool:
+        return init(self.root)
+
+    def apply(self, plan_path: str, *, approve: bool = False) -> str:
+        return apply(self.root, plan_path, approve=approve)
+
+    def revert(self, run_id: str) -> None:
+        revert(self.root, run_id)
+
+    def run_sync(
+        self, objective: str, from_: Optional[str] = None, *, approve: bool = False
+    ) -> RunOutcome:
+        return run_sync(self.root, objective, from_, approve=approve)
+
+    def evolve_sync(
+        self, objective: str, from_: Optional[str] = None, *, apply: bool = False
+    ) -> EvolveOutcome:
+        return evolve_sync(self.root, objective, from_, apply=apply)
+
+    async def run(
+        self, objective: str, from_: Optional[str] = None, *, approve: bool = False
+    ) -> RunOutcome:
+        return await run(self.root, objective, from_, approve=approve)
+
+    async def evolve(
+        self, objective: str, from_: Optional[str] = None, *, apply: bool = False
+    ) -> EvolveOutcome:
+        return await evolve(self.root, objective, from_, apply=apply)
