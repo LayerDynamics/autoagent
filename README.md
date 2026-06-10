@@ -120,6 +120,19 @@ The supervised `run` loop is built to land a *valid* change, not just any change
 
 This raises the first-try and within-budget success rate substantially, but success on any given objective still depends on the model — a weak model on a hard task can exhaust the repair budget. Point it at a stronger model (`qwen2.5-coder:32b` or a cloud model) for the highest reliability.
 
+### Autonomous mode (opt-in, bounded)
+
+For multi-step objectives, set `[agent] autonomous = true`. The agent then keeps performing the **next** concrete step toward the **same** objective across validated cycles — after each step it asks itself whether the objective is complete, and stops when it is — until done, until a step can't be repaired, or until `max_steps_per_run` is exhausted.
+
+It is "more autonomous" only in *iteration*, not in *authority*. The bright lines are enforced in code, not just documented:
+
+- It pursues the objective **you** gave it and **never invents a new or different goal**.
+- Every step still goes through plan → **policy gate** → snapshot → apply → validate, and is **reversible**.
+- It does **not** bypass the approval gates: writes/commands still need `--yes` or the configured approvals, and self-modification still needs `allow_self_modification = true`.
+- It is always **step-bounded** (`max_steps_per_run`) and stops conservatively — any ambiguity about completion ends the run rather than looping.
+
+This is *controlled self-authoring, not uncontrolled self-replication*: autonomy of execution toward your goal, never autonomy from the safety contract.
+
 ## Commands
 
 | Command | Purpose | Default write behavior |

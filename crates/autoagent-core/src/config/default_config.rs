@@ -11,6 +11,7 @@ package_manager = "cargo"
 [agent]
 mode = "supervised"
 allow_self_modification = false
+autonomous = false
 max_steps_per_run = 12
 require_approval_before_write = true
 require_approval_before_command = true

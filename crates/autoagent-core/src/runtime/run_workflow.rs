@@ -47,7 +47,12 @@ pub async fn run_workflow(
     auto_approve: bool,
 ) -> Result<RunOutcome> {
     let config = AutoAgentConfig::load(root)?;
+    // One shared budget bounds ALL plan→apply work for this run — repairs and
+    // (in autonomous mode) forward steps alike — so a run can never exceed
+    // `max_steps_per_run` cycles regardless of mode.
+    let mut budget = StepBudget::new(config.agent.max_steps_per_run);
 
+    // Cycle 1: plan the objective and apply it, repairing on validation failure.
     let plan = agent_planner::generate_plan_agentic(
         PromptKind::Project,
         objective,
@@ -57,33 +62,68 @@ pub async fn run_workflow(
     )
     .await?;
     let (mut run_id, mut report) = apply_written_plan(root, objective, &plan, auto_approve)?;
+    let mut history = vec![plan.summary.clone()];
 
     if !report.passed {
-        let real_root = canonical(root);
-        let mut budget = StepBudget::new(config.agent.max_steps_per_run);
-        while !report.passed && budget.try_consume() {
-            // Capture what the failed attempt authored BEFORE reverting it, so the
-            // repair can fix the specific defect (e.g. a wrong test assertion)
-            // instead of re-guessing the whole change from scratch.
-            let run_dir = real_root.join(&config.runs.directory).join(&run_id);
-            let prior_files = read_authored_files(&run_dir);
+        let (rid, rep) = repair_to_pass(
+            root,
+            objective,
+            &config,
+            provider,
+            auto_approve,
+            run_id,
+            report,
+            &mut budget,
+        )
+        .await?;
+        run_id = rid;
+        report = rep;
+    }
 
-            // Revert the failed attempt so the repair starts from the pre-failure
-            // tree — a destructive attempt must not poison later repairs.
-            crate::runtime::revert::revert(root, &run_id)?;
-
-            let repair_objective = build_repair_objective(objective, &report, &prior_files);
-            let repair_plan = agent_planner::generate_plan_agentic(
+    // Bounded autonomous continuation (opt-in). Keep performing the NEXT concrete
+    // step toward the SAME objective until the model reports it complete, a step
+    // cannot be repaired, or the shared budget is exhausted. Every step still goes
+    // through plan → policy → apply → validate and is reversible; the objective
+    // never changes and no gate is bypassed.
+    if config.agent.autonomous && report.passed {
+        while budget.try_consume() {
+            // Ask whether the objective is fully satisfied before doing more work.
+            // Conservative: any error/ambiguity means "complete" (stop), so the
+            // loop can never spin forever.
+            if objective_complete(objective, &history, provider).await {
+                break;
+            }
+            let next_objective = continuation_objective(objective, &history);
+            let next_plan = agent_planner::generate_plan_agentic(
                 PromptKind::Project,
-                &repair_objective,
+                &next_objective,
                 &config,
                 root,
                 provider,
             )
             .await?;
-            let (rid, rep) = apply_written_plan(root, objective, &repair_plan, auto_approve)?;
+            let (rid, rep) = apply_written_plan(root, objective, &next_plan, auto_approve)?;
             run_id = rid;
             report = rep;
+            if !report.passed {
+                let (rid, rep) = repair_to_pass(
+                    root,
+                    objective,
+                    &config,
+                    provider,
+                    auto_approve,
+                    run_id,
+                    report,
+                    &mut budget,
+                )
+                .await?;
+                run_id = rid;
+                report = rep;
+                if !report.passed {
+                    break; // could not land this step; stop autonomous progress
+                }
+            }
+            history.push(next_plan.summary.clone());
         }
     }
 
@@ -92,6 +132,102 @@ pub async fn run_workflow(
     }
 
     Ok(finish_outcome(run_id, report))
+}
+
+/// Revert-and-re-plan repair loop, shared by the first cycle and (in autonomous
+/// mode) each forward step. Consumes the shared step budget.
+#[allow(clippy::too_many_arguments)]
+async fn repair_to_pass(
+    root: &Utf8Path,
+    objective: &str,
+    config: &AutoAgentConfig,
+    provider: &dyn LlmProvider,
+    auto_approve: bool,
+    mut run_id: String,
+    mut report: ValidationReport,
+    budget: &mut StepBudget,
+) -> Result<(String, ValidationReport)> {
+    let real_root = canonical(root);
+    while !report.passed && budget.try_consume() {
+        // Capture what the failed attempt authored BEFORE reverting it, so the
+        // repair can fix the specific defect instead of re-guessing from scratch.
+        let run_dir = real_root.join(&config.runs.directory).join(&run_id);
+        let prior_files = read_authored_files(&run_dir);
+
+        // Revert the failed attempt so the repair starts from the pre-failure
+        // tree — a destructive attempt must not poison later repairs.
+        crate::runtime::revert::revert(root, &run_id)?;
+
+        let repair_objective = build_repair_objective(objective, &report, &prior_files);
+        let repair_plan = agent_planner::generate_plan_agentic(
+            PromptKind::Project,
+            &repair_objective,
+            config,
+            root,
+            provider,
+        )
+        .await?;
+        let (rid, rep) = apply_written_plan(root, objective, &repair_plan, auto_approve)?;
+        run_id = rid;
+        report = rep;
+    }
+    Ok((run_id, report))
+}
+
+/// Prompt for the next autonomous step: pursue the SAME objective. The agent
+/// never invents a new goal — it only continues toward the one it was given.
+fn continuation_objective(objective: &str, history: &[String]) -> String {
+    let done = history
+        .iter()
+        .map(|h| format!("- {h}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "{objective}\n\nSteps already applied and validated toward this objective:\n{done}\n\n\
+         Perform the SINGLE next concrete step toward the SAME objective — do NOT start a different \
+         or new task."
+    )
+}
+
+/// Ask the model whether the objective is fully satisfied (structured yes/no).
+/// Defaults to `true` (stop) on any error or ambiguity so autonomous mode can
+/// never loop forever. This is only a *stop* signal — it cannot start new work.
+async fn objective_complete(
+    objective: &str,
+    history: &[String],
+    provider: &dyn crate::planning::llm::provider::LlmProvider,
+) -> bool {
+    use crate::planning::llm::provider::PlanRequest;
+    let done = history
+        .iter()
+        .map(|h| format!("- {h}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let prompt = format!(
+        "Objective: {objective}\n\nSteps already applied and validated:\n{done}\n\nIs this \
+         objective now FULLY complete, needing no further code changes? Reply with ONLY \
+         {{\"complete\": true}} or {{\"complete\": false}}."
+    );
+    let schema = json!({
+        "type": "object",
+        "properties": {"complete": {"type": "boolean"}},
+        "required": ["complete"]
+    });
+    let raw = match provider
+        .complete(&PlanRequest {
+            objective: objective.to_string(),
+            context: prompt,
+            format: Some(schema),
+        })
+        .await
+    {
+        Ok(r) => r,
+        Err(_) => return true,
+    };
+    crate::planning::planner::extract_json(&raw)
+        .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+        .and_then(|v| v.get("complete").and_then(|c| c.as_bool()))
+        .unwrap_or(true)
 }
 
 /// Append a decision summarizing a completed run (best-effort: a memory write
@@ -647,6 +783,85 @@ mod tests {
         assert!(
             healed.contains("pub fn add(a: i32) -> i32 {"),
             "messy.rs should have been reformatted by auto-heal, got:\n{healed}"
+        );
+    }
+
+    /// Scripts plan responses + completion-check answers separately, so an
+    /// autonomous run can be driven deterministically.
+    struct AutonomousProvider {
+        plans: Mutex<Vec<String>>,
+        completes: Mutex<Vec<bool>>,
+    }
+    #[async_trait::async_trait]
+    impl LlmProvider for AutonomousProvider {
+        fn name(&self) -> &str {
+            "autonomous"
+        }
+        async fn complete(&self, req: &PlanRequest) -> Result<String> {
+            if req.context.contains("scoping a code change") {
+                return Ok("[]".into()); // scout
+            }
+            if req.context.contains("FULLY complete, needing no further") {
+                let mut c = self.completes.lock().unwrap();
+                let done = if c.is_empty() { true } else { c.remove(0) };
+                return Ok(format!("{{\"complete\": {done}}}"));
+            }
+            Ok(self.plans.lock().unwrap().remove(0)) // plan
+        }
+    }
+
+    #[tokio::test]
+    async fn autonomous_mode_runs_multiple_steps_until_complete() {
+        let (dir, _cfg) = workspace();
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        let mut cfg =
+            AutoAgentConfig::from_toml_str(&crate::config::default_config::default_toml()).unwrap();
+        cfg.agent.autonomous = true;
+        std::fs::write(root.join("Autoagent.toml"), toml::to_string(&cfg).unwrap()).unwrap();
+
+        // Step 1 → a.rs; "not complete" → step 2 → b.rs; "complete" → stop.
+        let provider = AutonomousProvider {
+            plans: Mutex::new(vec![
+                plan_json("crates/a.rs", ""),
+                plan_json("crates/b.rs", ""),
+            ]),
+            completes: Mutex::new(vec![false, true]),
+        };
+        let outcome = run_workflow(root, "create two modules", &provider, true)
+            .await
+            .unwrap();
+        assert!(matches!(outcome.final_state, RunState::Completed));
+        // BOTH forward steps were applied autonomously toward the one objective.
+        assert!(
+            root.join("crates/a.rs").as_std_path().exists(),
+            "step 1 applied"
+        );
+        assert!(
+            root.join("crates/b.rs").as_std_path().exists(),
+            "step 2 applied"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_autonomous_stops_after_one_successful_step() {
+        let (dir, _cfg) = workspace(); // default config: autonomous = false
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        // Even though a second step is queued, the non-autonomous run must stop
+        // after the first successful cycle.
+        let provider = ScriptedProvider {
+            responses: Mutex::new(vec![
+                plan_json("crates/a.rs", ""),
+                plan_json("crates/b.rs", ""),
+            ]),
+        };
+        let outcome = run_workflow(root, "one step", &provider, true)
+            .await
+            .unwrap();
+        assert!(matches!(outcome.final_state, RunState::Completed));
+        assert!(root.join("crates/a.rs").as_std_path().exists());
+        assert!(
+            !root.join("crates/b.rs").as_std_path().exists(),
+            "non-autonomous must not perform a second step"
         );
     }
 }

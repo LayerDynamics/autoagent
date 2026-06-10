@@ -47,6 +47,13 @@ pub struct AgentConfig {
     pub max_steps_per_run: u32,
     pub require_approval_before_write: bool,
     pub require_approval_before_command: bool,
+    /// Bounded autonomous execution (opt-in). When true, a `run` keeps performing
+    /// the NEXT step toward the SAME objective across validated cycles until the
+    /// model reports completion or `max_steps_per_run` is exhausted. It never
+    /// invents new objectives and never bypasses the policy/snapshot/approval
+    /// gates. Default `false`. Absent in older configs (serde default).
+    #[serde(default)]
+    pub autonomous: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
