@@ -53,6 +53,13 @@ pub async fn run_workflow(
     if !report.passed {
         let mut budget = StepBudget::new(config.agent.max_steps_per_run);
         while !report.passed && budget.try_consume() {
+            // Revert the failed attempt BEFORE re-planning, so each repair starts
+            // from the pre-failure tree. Without this, a destructive attempt
+            // (e.g. a bad full-file replace) poisons every later repair, which
+            // can then never recover. The repair re-plans the whole objective
+            // from that clean base with the failure context.
+            crate::runtime::revert::revert(root, &run_id)?;
+
             let ctx = RepairContext::from_failure(&report);
             let repair_objective = format!(
                 "{objective}\n\nThe previous attempt failed validation command `{}`:\n{}",
@@ -200,7 +207,13 @@ mod tests {
         fn name(&self) -> &str {
             "scripted"
         }
-        async fn complete(&self, _req: &PlanRequest) -> Result<String> {
+        async fn complete(&self, req: &PlanRequest) -> Result<String> {
+            // The planner issues a cheap "scout" call before the plan call; in
+            // tests we want no file context, so answer it with an empty list and
+            // do not consume a queued plan response.
+            if req.context.contains("scoping a code change") {
+                return Ok("[]".into());
+            }
             let mut r = self.responses.lock().unwrap();
             Ok(if r.is_empty() {
                 r.last().cloned().unwrap_or_default()
@@ -274,5 +287,48 @@ mod tests {
         let outcome = run_workflow(root, "fix", &provider, true).await.unwrap();
         assert!(matches!(outcome.final_state, RunState::Completed));
         assert!(root.join("crates/b.rs").as_std_path().exists());
+    }
+
+    /// Regression: a destructive first attempt that corrupts an existing file
+    /// AND fails validation must be REVERTED before the repair runs, so the
+    /// repair starts from the pre-failure tree and the existing file survives.
+    #[tokio::test]
+    async fn repair_reverts_destructive_attempt_before_retry() {
+        let (dir, _cfg) = workspace();
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        let mut cfg =
+            AutoAgentConfig::from_toml_str(&crate::config::default_config::default_toml()).unwrap();
+        cfg.safety.allowed_commands.push("false".into());
+        std::fs::write(root.join("Autoagent.toml"), toml::to_string(&cfg).unwrap()).unwrap();
+
+        // An existing source file that the bad attempt will clobber.
+        std::fs::create_dir_all(root.join("src").as_std_path()).unwrap();
+        std::fs::write(root.join("src/keep.rs"), "ORIGINAL").unwrap();
+
+        let destructive = r#"{"objective":"o","summary":"s","files_to_read":[],
+          "files_to_create":[],"files_to_modify":[{"path":"src/keep.rs","purpose":"x"}],
+          "operations":[{"kind":"Replace","path":"src/keep.rs","destination_path":null,
+            "reason":"r","before_hash":null,"after_hash":null,"content":"BROKEN"}],
+          "validation_commands":["false"],"risks":[],"rollback_strategy":"snapshot"}"#;
+        let provider = ScriptedProvider {
+            responses: Mutex::new(vec![
+                destructive.to_string(), // attempt 1: clobbers keep.rs + fails validation
+                plan_json("crates/ok.rs", ""), // repair: clean, passes
+            ]),
+        };
+
+        let outcome = run_workflow(root, "improve", &provider, true)
+            .await
+            .unwrap();
+
+        assert!(matches!(outcome.final_state, RunState::Completed));
+        assert!(root.join("crates/ok.rs").as_std_path().exists());
+        // The clobbered file must be restored to its pre-failure content — the
+        // destructive attempt was reverted before the repair, not left in place.
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/keep.rs")).unwrap(),
+            "ORIGINAL",
+            "destructive attempt must be reverted before repair"
+        );
     }
 }

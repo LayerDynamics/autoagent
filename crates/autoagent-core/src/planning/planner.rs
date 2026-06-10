@@ -38,7 +38,17 @@ pub async fn generate_plan_kind(
     let analysis = project_analyzer::analyze(root, config)?;
     let store = crate::memory::memory_store::MemoryStore::new(root.join(&config.memory.directory));
     let decisions = crate::memory::project_memory::recent_decision_summaries(&store, 5);
-    let context = prompt_builder::build_kind(kind, objective, &analysis, &decisions);
+
+    // Forward the CURRENT contents of the files the change will touch so the
+    // model authors correct, surgical edits instead of replacing an unseen file
+    // with a hallucinated guess. Secret/excluded files are never forwarded and
+    // secret-looking lines are scrubbed (Redactor). For the local provider this
+    // stays on-machine; for a cloud provider it is already gated by
+    // `code_egress_opt_in` in the provider factory.
+    let redactor = Redactor::new(config.workspace.exclude.clone());
+    let files = gather_file_context(objective, root, &redactor, provider).await;
+
+    let context = prompt_builder::build_kind(kind, objective, &analysis, &decisions, &files);
 
     let raw = provider
         .complete(&PlanRequest {
@@ -53,7 +63,6 @@ pub async fn generate_plan_kind(
         .map_err(|e| AutoAgentError::Plan(format!("provider JSON invalid: {e}")))?;
 
     // Defense in depth: refuse a plan that would read excluded/secret files.
-    let redactor = Redactor::new(config.workspace.exclude.clone());
     for f in &plan.files_to_read {
         if redactor.is_excluded(f.as_str()) {
             return Err(AutoAgentError::Plan(format!(
@@ -74,6 +83,98 @@ fn extract_json(s: &str) -> Option<&str> {
     (end > start).then(|| &s[start..=end])
 }
 
+// --- file-context gathering (so the model can edit existing files correctly) ---
+
+/// Caps that bound how much existing source is read + forwarded for one plan.
+const MAX_CONTEXT_FILES: usize = 12;
+const MAX_FILE_BYTES: usize = 16 * 1024;
+const MAX_TOTAL_BYTES: usize = 64 * 1024;
+
+/// Determine which existing files to show the model, then read them (bounded,
+/// redactor-filtered, scrubbed). Two sources are merged: paths the objective
+/// names verbatim (deterministic safety net) and a cheap "scout" call asking the
+/// model which files it must see. Failure of either degrades gracefully to the
+/// other / to none — planning still proceeds (matching prior behavior).
+async fn gather_file_context(
+    objective: &str,
+    root: &Utf8Path,
+    redactor: &Redactor,
+    provider: &dyn LlmProvider,
+) -> Vec<(String, String)> {
+    let mut candidates: Vec<String> = objective_path_tokens(objective);
+
+    // Scout pass: ask the model which existing files it needs to read.
+    let scout = prompt_builder::build_scout(objective);
+    if let Ok(raw) = provider
+        .complete(&PlanRequest {
+            objective: objective.to_string(),
+            context: scout,
+        })
+        .await
+    {
+        candidates.extend(extract_path_list(&raw));
+    }
+
+    read_bounded(root, &candidates, redactor)
+}
+
+/// Path-like tokens (containing `/`) that appear verbatim in the objective.
+fn objective_path_tokens(objective: &str) -> Vec<String> {
+    objective
+        .split(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '`' | '(' | ')' | ',' | ';'))
+        .map(|t| t.trim_matches(|c: char| matches!(c, '.' | ':')))
+        .filter(|t| t.contains('/') && !t.is_empty())
+        .map(|t| t.to_string())
+        .collect()
+}
+
+/// Parse the scout response: the first JSON array of strings, else empty.
+fn extract_path_list(raw: &str) -> Vec<String> {
+    let (start, end) = match (raw.find('['), raw.rfind(']')) {
+        (Some(s), Some(e)) if e > s => (s, e),
+        _ => return Vec::new(),
+    };
+    serde_json::from_str::<Vec<String>>(&raw[start..=end]).unwrap_or_default()
+}
+
+/// Read the candidate files within the workspace, skipping excluded/secret,
+/// missing, oversized, or escaping paths; scrub secrets; cap count + total size.
+fn read_bounded(
+    root: &Utf8Path,
+    candidates: &[String],
+    redactor: &Redactor,
+) -> Vec<(String, String)> {
+    let real_root = canonical(root);
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut total = 0usize;
+
+    for raw_path in candidates {
+        if out.len() >= MAX_CONTEXT_FILES || total >= MAX_TOTAL_BYTES {
+            break;
+        }
+        let rel = raw_path.trim().trim_start_matches("./");
+        if rel.is_empty() || !seen.insert(rel.to_string()) || redactor.is_excluded(rel) {
+            continue;
+        }
+        let abs = match std::fs::canonicalize(real_root.join(rel).as_std_path()) {
+            Ok(p) => p,
+            Err(_) => continue, // missing path
+        };
+        // Never read outside the workspace (defense against `../` escapes).
+        if !abs.starts_with(real_root.as_std_path()) || !abs.is_file() {
+            continue;
+        }
+        let content = match std::fs::read_to_string(&abs) {
+            Ok(c) if c.len() <= MAX_FILE_BYTES => c,
+            _ => continue, // binary, unreadable, or oversized
+        };
+        total += content.len();
+        out.push((rel.to_string(), redactor.scrub(&content)));
+    }
+    out
+}
+
 fn canonical(root: &Utf8Path) -> Utf8PathBuf {
     std::fs::canonicalize(root.as_std_path())
         .ok()
@@ -85,6 +186,7 @@ fn canonical(root: &Utf8Path) -> Utf8PathBuf {
 mod tests {
     use super::*;
     use crate::planning::llm::provider::LlmProvider;
+    use std::sync::Mutex;
 
     struct FakeProvider(String);
 
@@ -95,6 +197,25 @@ mod tests {
         }
         async fn complete(&self, _req: &PlanRequest) -> Result<String> {
             Ok(self.0.clone())
+        }
+    }
+
+    /// Returns queued responses in call order and records each call's context,
+    /// so a test can inspect exactly what the plan prompt contained.
+    struct CapturingProvider {
+        responses: Vec<String>,
+        contexts: Mutex<Vec<String>>,
+    }
+    #[async_trait::async_trait]
+    impl LlmProvider for CapturingProvider {
+        fn name(&self) -> &str {
+            "capturing"
+        }
+        async fn complete(&self, req: &PlanRequest) -> Result<String> {
+            let mut c = self.contexts.lock().unwrap();
+            let idx = c.len();
+            c.push(req.context.clone());
+            Ok(self.responses.get(idx).cloned().unwrap_or_default())
         }
     }
 
@@ -113,6 +234,46 @@ mod tests {
         .unwrap();
         let cfg = AutoAgentConfig::load(root).unwrap();
         (dir, cfg)
+    }
+
+    #[tokio::test]
+    async fn planner_forwards_existing_file_contents_to_plan_prompt() {
+        let (dir, cfg) = workspace();
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        // An existing source file the change must edit correctly.
+        std::fs::create_dir_all(root.join("src").as_std_path()).unwrap();
+        std::fs::write(
+            root.join("src/lib.rs"),
+            "pub mod runtime;\npub mod analysis;\n",
+        )
+        .unwrap();
+        let provider = CapturingProvider {
+            responses: vec![
+                // scout: name the file the planner should read
+                r#"["src/lib.rs"]"#.into(),
+                // plan: a valid (append) plan
+                r#"{"objective":"o","summary":"s","files_to_read":[],
+                  "files_to_create":[],"files_to_modify":[{"path":"src/lib.rs","purpose":"p"}],
+                  "operations":[{"kind":"Append","path":"src/lib.rs","destination_path":null,
+                    "reason":"r","before_hash":null,"after_hash":null,"content":"pub mod x;\n"}],
+                  "validation_commands":[],"risks":[],"rollback_strategy":"snapshot"}"#
+                    .into(),
+            ],
+            contexts: Mutex::new(Vec::new()),
+        };
+        let plan = generate_plan("add module x to src/lib.rs", &cfg, root, &provider)
+            .await
+            .unwrap();
+        assert_eq!(plan.operations.len(), 1);
+        // The PLAN prompt (2nd call) must contain the real file content, so the
+        // model can edit instead of replacing an unseen file.
+        let contexts = provider.contexts.lock().unwrap();
+        assert_eq!(contexts.len(), 2, "expected a scout call then a plan call");
+        assert!(
+            contexts[1].contains("pub mod runtime;")
+                && contexts[1].contains("Existing file contents"),
+            "plan prompt must include the existing file's content"
+        );
     }
 
     #[tokio::test]

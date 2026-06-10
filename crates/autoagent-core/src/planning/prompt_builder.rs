@@ -1,7 +1,10 @@
 //! Prompt builder (M3) — embeds the JSON Plan schema and policy constraints so
-//! the model self-limits, plus a structural project summary for context. File
-//! *contents* are not forwarded in M3 (only metadata), so nothing sensitive
-//! leaves the machine here; the planner still validates every returned plan.
+//! the model self-limits, plus a structural project summary for context. The
+//! planner also forwards the current contents of the files a change will touch
+//! (via `files`) so edits to existing files are accurate; those contents are
+//! redactor-filtered (secret/excluded files dropped, secret lines scrubbed) and,
+//! for the local provider, never leave the machine. The planner still validates
+//! every returned plan against policy regardless.
 //!
 //! Two framings are produced (`PromptKind`):
 //! - `Project` — planning changes to the *user's* project. The model is told to
@@ -23,17 +26,38 @@ pub enum PromptKind {
     SelfAuthoring,
 }
 
-/// Build the default (`Project`) planning prompt.
+/// Build the default (`Project`) planning prompt with no file context.
 pub fn build(objective: &str, analysis: &ProjectAnalysis, recent_decisions: &[String]) -> String {
-    build_kind(PromptKind::Project, objective, analysis, recent_decisions)
+    build_kind(
+        PromptKind::Project,
+        objective,
+        analysis,
+        recent_decisions,
+        &[],
+    )
 }
 
-/// Build a planning prompt for the given posture.
+/// Build a short "scout" prompt asking the model which existing files it must
+/// read to plan the objective. The planner reads those files and feeds their
+/// contents back into `build_kind` so edits to existing files are accurate.
+pub fn build_scout(objective: &str) -> String {
+    format!(
+        "You are scoping a code change. List the EXISTING files (workspace-relative paths) whose \
+         current contents you must see to plan this objective accurately — especially any file you \
+         intend to modify. Output ONLY a JSON array of path strings, e.g. [\"src/lib.rs\"]; output \
+         [] if none are needed. Objective: {objective}\n"
+    )
+}
+
+/// Build a planning prompt for the given posture. `files` carries the current
+/// contents of the files the change is expected to touch (read-only context) so
+/// the model edits existing files correctly instead of replacing unseen ones.
 pub fn build_kind(
     kind: PromptKind,
     objective: &str,
     analysis: &ProjectAnalysis,
     recent_decisions: &[String],
+    files: &[(String, String)],
 ) -> String {
     let deps = analysis
         .dependencies
@@ -74,7 +98,10 @@ pub fn build_kind(
          the change (build/test/lint). Only return a minimal plan when the objective is purely \
          informational and needs no edits. Each operation's `kind` MUST be EXACTLY ONE of these \
          literal values — Create, Write, Replace, Append, Delete, Rename, CreateDirectory — never the \
-         pipe-joined list itself.";
+         pipe-joined list itself. When you MODIFY an existing file, base your new `content` on that \
+         file's actual current text shown under \"Existing file contents\" below — reproduce ALL of \
+         its existing content plus your change; NEVER replace a file you have not been shown, and \
+         prefer Append when only adding to the end.";
 
     let self_directive = match kind {
         PromptKind::Project => String::new(),
@@ -91,6 +118,19 @@ pub fn build_kind(
                 .to_string(),
     };
 
+    let file_context = if files.is_empty() {
+        String::new()
+    } else {
+        let mut s = String::from(
+            "\nExisting file contents (read-only — author edits from these; reproduce existing \
+             content plus your change, do not invent a replacement):\n",
+        );
+        for (path, content) in files {
+            s.push_str(&format!("\n=== {path} ===\n{content}\n"));
+        }
+        s
+    };
+
     format!(
         "{role} Produce ONLY a single JSON object matching this schema:\n\
          {{\"objective\":string,\"summary\":string,\"files_to_read\":[string],\
@@ -104,9 +144,9 @@ pub fn build_kind(
          Constraints: only write under allowed paths; never touch .git, target, .env, SSH material, \
          or any path outside the workspace; rollback_strategy MUST be \"snapshot\".\n\n\
          Project context: language={:?}, dependencies=[{}], top-level dirs={:?}.\n\
-         {}\
+         {}{}\
          Objective: {}\n",
-        analysis.language, deps, analysis.top_dirs, decisions, objective
+        analysis.language, deps, analysis.top_dirs, decisions, file_context, objective
     )
 }
 
@@ -142,7 +182,13 @@ mod tests {
 
     #[test]
     fn project_prompt_directs_concrete_authoring() {
-        let p = build_kind(PromptKind::Project, "add an endpoint", &analysis(), &[]);
+        let p = build_kind(
+            PromptKind::Project,
+            "add an endpoint",
+            &analysis(),
+            &[],
+            &[],
+        );
         // The general prompt now tells the model to actually implement changes.
         assert!(p.contains("IMPLEMENT them"));
         assert!(p.contains("Do NOT return an empty"));
@@ -151,11 +197,40 @@ mod tests {
     }
 
     #[test]
+    fn forwarded_file_contents_appear_in_prompt() {
+        let files = vec![(
+            "crates/autoagent-core/src/lib.rs".to_string(),
+            "pub mod runtime;\npub mod analysis;\n".to_string(),
+        )];
+        let p = build_kind(
+            PromptKind::Project,
+            "add a module",
+            &analysis(),
+            &[],
+            &files,
+        );
+        assert!(p.contains("Existing file contents"));
+        assert!(p.contains("=== crates/autoagent-core/src/lib.rs ==="));
+        // The model now SEES the real content, so it can edit instead of replace.
+        assert!(p.contains("pub mod runtime;"));
+        assert!(p.contains("NEVER replace a file you have not been shown"));
+    }
+
+    #[test]
+    fn scout_prompt_requests_json_path_list() {
+        let s = build_scout("modify crates/autoagent-core/src/lib.rs");
+        assert!(s.contains("JSON array"));
+        assert!(s.to_lowercase().contains("existing files"));
+        assert!(s.contains("modify crates/autoagent-core/src/lib.rs"));
+    }
+
+    #[test]
     fn self_authoring_prompt_directs_self_modification_and_validation() {
         let p = build_kind(
             PromptKind::SelfAuthoring,
             "fix the revert bug in autoagent-core",
             &analysis(),
+            &[],
             &[],
         );
         assert!(p.contains("improving its OWN source"));
