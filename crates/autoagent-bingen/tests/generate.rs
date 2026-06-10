@@ -92,6 +92,15 @@ fn mutating_sync_surface_emitted() {
 }
 
 #[test]
+fn package_scaffolds_emitted() {
+    let out = gen::render_all();
+    assert!(out["package.json"].contains("@autoagent/native"));
+    assert!(out["package.json"].contains("\"binaryName\": \"autoagent\""));
+    assert!(out["deno.json"].contains("./deno/mod.ts"));
+    assert!(out["dist/index.js"].contains("autoagent.${triple()}.node"));
+}
+
+#[test]
 fn wired_read_surface_present_in_all_stub_dialects() {
     let out = gen::render_all();
     // The read surface added in B2-T1 must appear in both stub dialects.

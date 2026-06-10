@@ -1,0 +1,10 @@
+{
+  "name": "@autoagent/native",
+  "version": "1.0.0",
+  "license": "MIT",
+  "exports": "./deno/mod.ts",
+  "tasks": {
+    "gen": "deno run -A deno/gen.ts",
+    "smoke": "deno run --allow-ffi --allow-read --allow-write --allow-env deno/smoke.ts"
+  }
+}

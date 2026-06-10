@@ -1,0 +1,33 @@
+{
+  "name": "@autoagent/native",
+  "version": "1.0.0",
+  "description": "Native Node.js bindings for the AutoAgent policy-controlled mutation engine",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/",
+    "index.d.ts"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "napi": {
+    "binaryName": "autoagent",
+    "targets": [
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-pc-windows-msvc",
+      "aarch64-pc-windows-msvc"
+    ]
+  },
+  "scripts": {
+    "build": "napi build --platform --release dist",
+    "test": "node --test __test__/"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3"
+  }
+}
