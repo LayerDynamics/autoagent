@@ -137,7 +137,7 @@ module.exports = require(join(__dirname, `autoagent.${triple()}.node`))
 // ---------------------------------------------------------------------------
 
 /// Distribution version, kept in lockstep with the workspace.
-const PKG_VERSION: &str = "1.0.0";
+const PKG_VERSION: &str = "0.0.1";
 
 fn package_json() -> String {
     format!(

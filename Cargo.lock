@@ -328,7 +328,7 @@ dependencies = [
 
 [[package]]
 name = "autoagent-bingen"
-version = "1.0.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "autoagent-core",
@@ -353,7 +353,7 @@ dependencies = [
 
 [[package]]
 name = "autoagent-cli"
-version = "1.0.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "autoagent-core",
@@ -371,7 +371,7 @@ dependencies = [
 
 [[package]]
 name = "autoagent-core"
-version = "1.0.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -398,7 +398,7 @@ dependencies = [
 
 [[package]]
 name = "autoagent-plugin-sdk"
-version = "1.0.0"
+version = "0.0.1"
 dependencies = [
  "serde",
  "serde_json",

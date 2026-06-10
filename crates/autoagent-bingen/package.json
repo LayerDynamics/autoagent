@@ -1,6 +1,6 @@
 {
   "name": "@autoagent/native",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "Native Node.js bindings for the AutoAgent policy-controlled mutation engine",
   "license": "MIT",
   "main": "dist/index.js",
