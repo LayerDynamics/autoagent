@@ -102,10 +102,7 @@ fn make_stamp(objective: &str) -> String {
 }
 
 fn canonical(root: &Utf8Path) -> Utf8PathBuf {
-    std::fs::canonicalize(root.as_std_path())
-        .ok()
-        .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
-        .unwrap_or_else(|| root.to_path_buf())
+    crate::safety::path_guard::canonical_root(root)
 }
 
 fn slugify(s: &str) -> String {

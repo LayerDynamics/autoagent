@@ -51,8 +51,11 @@ impl PathGuard {
             return Err(PolicyError::PathEscape(path.to_string()).into());
         }
         let rel = normalized.strip_prefix(&root).unwrap_or(&normalized);
-        // 4. symlink resolution (best effort) on the longest existing prefix
-        if symlink_escapes(&normalized, &self.root) {
+        // 4. symlink resolution (best effort) on the longest existing prefix.
+        // Use the normalized root so the candidate/root prefix forms match on
+        // Windows (both de-verbatimed, forward-slash) — `std::fs::canonicalize`
+        // accepts that form and re-adds the verbatim prefix consistently.
+        if symlink_escapes(&normalized, &root) {
             return Err(PolicyError::SymlinkEscape(path.to_string()).into());
         }
         // 5. block list (highest precedence among path-membership rules)
@@ -67,6 +70,36 @@ impl PathGuard {
     }
 }
 
+/// Strip a Windows verbatim prefix: `\\?\C:\ws` -> `C:\ws`, `\\?\UNC\srv\sh` ->
+/// `\\srv\sh`. Verbatim paths treat `/` as a literal character rather than a
+/// separator, which breaks lexical path reasoning; the simplified form parses
+/// normally. No-op on Unix and on already-plain paths (string never matches).
+fn simplify_verbatim(p: &Utf8Path) -> Utf8PathBuf {
+    let s = p.as_str();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        Utf8PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        Utf8PathBuf::from(rest)
+    } else {
+        p.to_path_buf()
+    }
+}
+
+/// Canonicalize a workspace `root` to an absolute, **de-verbatimed** path,
+/// falling back to the input when it is not on disk. This is the single source
+/// of truth for resolving a run's real root: `std::fs::canonicalize` returns a
+/// `\\?\C:\…` verbatim path on Windows, and every downstream `real_root.join(rel)`
+/// (file writes, snapshots, run dirs, revert) needs `/`-as-separator semantics —
+/// which verbatim paths disable. Stripping the prefix here keeps the whole
+/// runtime on plain paths.
+pub(crate) fn canonical_root(root: &Utf8Path) -> Utf8PathBuf {
+    let real = std::fs::canonicalize(root.as_std_path())
+        .ok()
+        .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
+        .unwrap_or_else(|| root.to_path_buf());
+    simplify_verbatim(&real)
+}
+
 /// Lexically normalize a path, preserving a leading root, without touching disk.
 ///
 /// The Windows drive/UNC prefix (`Prefix`, e.g. `C:` or `\\?\C:`) is preserved:
@@ -76,10 +109,16 @@ impl PathGuard {
 /// no `Prefix` component, so this path is inert there.
 fn lexical_normalize(p: &Utf8Path) -> Utf8PathBuf {
     use camino::Utf8Component::*;
+    // De-verbatim first: `std::fs::canonicalize` hands back `\\?\C:\…` on
+    // Windows, and a verbatim prefix disables `/`-as-separator. Joining a
+    // relative plan path (`crates/x.rs`) to such a root left the tail as one
+    // un-split component, so the lexical containment check tripped a false
+    // `path_escape`. Stripping it makes `/` a real separator again.
+    let simplified = simplify_verbatim(p);
     let mut prefix = String::new();
     let mut out: Vec<&str> = Vec::new();
     let mut is_abs = false;
-    for c in p.components() {
+    for c in simplified.components() {
         match c {
             Prefix(pre) => prefix = pre.as_str().to_string(),
             RootDir => {
@@ -212,13 +251,54 @@ mod tests {
         // Regression (CI: rust-tests · windows): an absolute Windows root
         // (`D:\ws`) joined with a forward-slash relative plan path
         // (`crates/x.rs`) must stay inside the workspace. Before preserving the
-        // drive prefix in `lexical_normalize`, this tripped a false `path_escape`
-        // and broke every Windows job (binding + python + node SDK apply tests).
+        // drive prefix in `lexical_normalize`, this tripped a false `path_escape`.
         let guard = PathGuard::new(Utf8PathBuf::from(r"D:\ws"), vec!["crates/".into()], vec![]);
         let ok = guard
             .check(Utf8PathBuf::from("crates/x.rs"), Access::Write)
             .expect("relative path under a Windows drive root must be allowed");
         assert!(ok.starts_with(r"D:\ws"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_verbatim_root_relative_path_is_inside() {
+        // Regression (CI: rust-tests / pyo3 / sdk-python / sdk-node · windows):
+        // `std::fs::canonicalize` hands back a verbatim root (`\\?\C:\ws`), where
+        // `/` is a literal char, not a separator. Joining `crates/x.rs` then left
+        // the tail un-split and tripped a false `path_escape` on EVERY relative
+        // apply. `simplify_verbatim` strips the prefix so containment holds.
+        let guard = PathGuard::new(
+            Utf8PathBuf::from(r"\\?\C:\ws"),
+            vec!["crates/".into()],
+            vec![],
+        );
+        let ok = guard
+            .check(Utf8PathBuf::from("crates/x.rs"), Access::Write)
+            .expect("relative path under a verbatim Windows root must be allowed");
+        assert!(ok.as_str().ends_with("crates/x.rs"));
+    }
+
+    #[test]
+    fn simplify_verbatim_strips_windows_prefix() {
+        // Pure string logic, so it runs on every platform: the de-verbatim step
+        // that makes the Windows containment check work.
+        assert_eq!(
+            simplify_verbatim(Utf8Path::new(r"\\?\C:\ws")).as_str(),
+            r"C:\ws"
+        );
+        assert_eq!(
+            simplify_verbatim(Utf8Path::new(r"\\?\UNC\srv\share")).as_str(),
+            r"\\srv\share"
+        );
+        // Plain paths pass through untouched.
+        assert_eq!(
+            simplify_verbatim(Utf8Path::new("/ws/crates")).as_str(),
+            "/ws/crates"
+        );
+        assert_eq!(
+            simplify_verbatim(Utf8Path::new("crates/x.rs")).as_str(),
+            "crates/x.rs"
+        );
     }
 
     #[test]
