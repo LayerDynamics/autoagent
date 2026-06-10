@@ -41,11 +41,16 @@ impl PathGuard {
             self.root.join(&path)
         };
         let normalized = lexical_normalize(&joined);
+        // Normalize the root the same way so the prefix comparison is on equal
+        // footing across platforms — on Windows the raw root carries a `\`
+        // separator and drive prefix (`D:\ws`) that must line up with the
+        // lexically normalized candidate.
+        let root = lexical_normalize(&self.root);
         // 3. escape check
-        if !normalized.starts_with(&self.root) {
+        if !normalized.starts_with(&root) {
             return Err(PolicyError::PathEscape(path.to_string()).into());
         }
-        let rel = normalized.strip_prefix(&self.root).unwrap_or(&normalized);
+        let rel = normalized.strip_prefix(&root).unwrap_or(&normalized);
         // 4. symlink resolution (best effort) on the longest existing prefix
         if symlink_escapes(&normalized, &self.root) {
             return Err(PolicyError::SymlinkEscape(path.to_string()).into());
@@ -63,13 +68,20 @@ impl PathGuard {
 }
 
 /// Lexically normalize a path, preserving a leading root, without touching disk.
+///
+/// The Windows drive/UNC prefix (`Prefix`, e.g. `C:` or `\\?\C:`) is preserved:
+/// dropping it turned an absolute Windows path into a rootless `/...` path that
+/// no longer shared a prefix with the (drive-qualified) workspace root, which
+/// tripped a false `path_escape` on every relative plan path. On Unix there is
+/// no `Prefix` component, so this path is inert there.
 fn lexical_normalize(p: &Utf8Path) -> Utf8PathBuf {
     use camino::Utf8Component::*;
+    let mut prefix = String::new();
     let mut out: Vec<&str> = Vec::new();
     let mut is_abs = false;
     for c in p.components() {
         match c {
-            Prefix(_) => {}
+            Prefix(pre) => prefix = pre.as_str().to_string(),
             RootDir => {
                 is_abs = true;
                 out.clear();
@@ -82,10 +94,12 @@ fn lexical_normalize(p: &Utf8Path) -> Utf8PathBuf {
         }
     }
     let joined = out.join("/");
-    if is_abs {
-        Utf8PathBuf::from(format!("/{joined}"))
+    let body = if is_abs { format!("/{joined}") } else { joined };
+    if prefix.is_empty() {
+        Utf8PathBuf::from(body)
     } else {
-        Utf8PathBuf::from(joined)
+        // e.g. `C:` + `/ws/crates` -> `C:/ws/crates` (camino parses the drive).
+        Utf8PathBuf::from(format!("{prefix}{body}"))
     }
 }
 
@@ -190,6 +204,21 @@ mod tests {
             .check("docs/readme.md".into(), Access::Write)
             .unwrap_err();
         assert_eq!(policy_code(&e), "not_allowed");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_drive_root_relative_path_is_inside() {
+        // Regression (CI: rust-tests · windows): an absolute Windows root
+        // (`D:\ws`) joined with a forward-slash relative plan path
+        // (`crates/x.rs`) must stay inside the workspace. Before preserving the
+        // drive prefix in `lexical_normalize`, this tripped a false `path_escape`
+        // and broke every Windows job (binding + python + node SDK apply tests).
+        let guard = PathGuard::new(Utf8PathBuf::from(r"D:\ws"), vec!["crates/".into()], vec![]);
+        let ok = guard
+            .check(Utf8PathBuf::from("crates/x.rs"), Access::Write)
+            .expect("relative path under a Windows drive root must be allowed");
+        assert!(ok.starts_with(r"D:\ws"));
     }
 
     #[test]
