@@ -12,4 +12,4 @@ dynamic = ["version"]
 [tool.maturin]
 # Build the pyo3 cdylib only; the napi/deno/rustpython backends stay off.
 features = ["py-pyo3"]
-module-name = "autoagent"
+module-name = "_native"

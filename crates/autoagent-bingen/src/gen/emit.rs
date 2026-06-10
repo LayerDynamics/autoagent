@@ -806,7 +806,7 @@ fn node_bindgen_fn(s: &Symbol) -> String {
 const PYO3_GLUE: &str = r#"use pyo3::prelude::*;
 use crate::bind;
 
-pyo3::create_exception!(autoagent, AutoAgentError, pyo3::exceptions::PyException);
+pyo3::create_exception!(_native, AutoAgentError, pyo3::exceptions::PyException);
 
 fn to_py(e: bind::BindError) -> PyErr {
     AutoAgentError::new_err(format!("[{}|{}] {}", e.code, e.exit_code, e.message))
@@ -833,7 +833,7 @@ fn pyo3_backend() -> String {
         ));
     }
     out.push_str(&format!(
-        "#[pymodule]\nfn autoagent(m: &Bound<'_, PyModule>) -> PyResult<()> {{\n    m.add(\"AutoAgentError\", m.py().get_type::<AutoAgentError>())?;\n{registrations}    Ok(())\n}}\n"
+        "#[pymodule]\nfn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {{\n    m.add(\"AutoAgentError\", m.py().get_type::<AutoAgentError>())?;\n{registrations}    Ok(())\n}}\n"
     ));
     out
 }

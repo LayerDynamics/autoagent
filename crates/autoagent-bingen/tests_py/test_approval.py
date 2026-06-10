@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-import autoagent
+import _native as autoagent
 
 
 def _seed(root: str) -> str:

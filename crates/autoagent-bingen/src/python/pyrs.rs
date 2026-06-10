@@ -2,7 +2,7 @@
 use crate::bind;
 use pyo3::prelude::*;
 
-pyo3::create_exception!(autoagent, AutoAgentError, pyo3::exceptions::PyException);
+pyo3::create_exception!(_native, AutoAgentError, pyo3::exceptions::PyException);
 
 fn to_py(e: bind::BindError) -> PyErr {
     AutoAgentError::new_err(format!("[{}|{}] {}", e.code, e.exit_code, e.message))
@@ -134,7 +134,7 @@ fn evolve(
 }
 
 #[pymodule]
-fn autoagent(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("AutoAgentError", m.py().get_type::<AutoAgentError>())?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add_function(wrap_pyfunction!(doctor, m)?)?;

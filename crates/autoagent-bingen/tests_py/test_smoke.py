@@ -3,7 +3,7 @@ returns sane values straight from autoagent-core."""
 
 import json
 
-import autoagent
+import _native as autoagent
 
 
 def test_version_is_schema_version():

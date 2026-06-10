@@ -1,0 +1,21 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "autoagent"
+description = "Typed Python SDK for the AutoAgent policy-controlled mutation engine"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dynamic = ["version"]
+
+[tool.maturin]
+# Build the pyo3 cdylib from the bingen crate and install it as the `_native`
+# submodule of the pure-Python `autoagent` package (mixed Rust/Python layout).
+manifest-path = "../../crates/autoagent-bingen/Cargo.toml"
+features = ["py-pyo3"]
+module-name = "autoagent._native"
+python-source = "."
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

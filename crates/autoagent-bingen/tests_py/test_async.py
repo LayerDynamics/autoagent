@@ -5,7 +5,7 @@ import asyncio
 import json
 import os
 
-import autoagent
+import _native as autoagent
 
 
 def _seed(root: str) -> str:
