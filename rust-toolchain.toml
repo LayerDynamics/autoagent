@@ -1,3 +1,7 @@
+# Pinned to an exact version (not "stable") so `bingen check` — which runs
+# rustfmt on generated code and diffs against the committed golden — and
+# `cargo fmt --check` stay deterministic between local dev and CI. A moving
+# "stable" rustfmt could reformat generated files and red the drift/fmt gates.
 [toolchain]
-channel = "stable"
+channel = "1.96.0"
 components = ["clippy", "rustfmt"]

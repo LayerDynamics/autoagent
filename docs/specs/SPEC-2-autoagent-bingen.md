@@ -12,6 +12,35 @@
 
 ---
 
+## 0. Implementation Status (2026-06-10)
+
+The crate is implemented (B1–B5). What differs from the original draft below:
+
+- **All six backends build, load, and run** with fail-closed safety, each verified
+  end-to-end (`crates/autoagent-bingen/scripts/smoke-all.sh`, exit 0):
+  napi-rs, node-bindgen, pyo3, RustPython, deno_bindgen, raw FFI.
+- **R-1 / Q-1 RESOLVED — RustPython works for real** as a CPython-free native
+  `#[rustpython_vm::pymodule]` installed via
+  `Interpreter::builder(..).add_native_module(module_def(&ctx))`. It is *not*
+  "experimental / pyo3-only"; the §App-B "experimental" tag and the §3.1 diagram
+  `[+ rustpython, exp.]` annotation are superseded by this section.
+- **node-bindgen REALITY:** nj-core 6.1's old `#[ctor]` `napi_module_register`
+  is not honored by Node 18+ and is dead-stripped. The generated backend exports
+  `napi_register_module_v1` delegating to nj-core's `init_modules`, and the
+  cdylib is built with `RUSTFLAGS="-C link-dead-code"`. R-2's deno_bindgen note
+  also realized: its CLI can't locate `bindings.json` in a workspace+build.rs
+  crate, so `deno/gen.ts` calls deno_bindgen's `codegen()` directly.
+- **FR-5 (async `run`/`evolve` as Promise/awaitable) is PARTIAL.** The sync
+  surface ships and is wired (`run_sync`/`evolve_sync`, plus `apply`/`revert`),
+  fully fail-closed. The async Promise/awaitable variants are an open item
+  tracked as B3-T6 — decoupled deliberately so async ergonomics never gate the
+  safety guarantees. **This is the one remaining MUST not yet met.**
+- **Safety-parity E2E covers `apply` (binding == real CLI, byte-identical patch).**
+  `evolve --apply` (self-authoring) parity is not yet covered by an E2E and is a
+  follow-up.
+
+---
+
 ## 1. Background
 
 ### 1.1 Problem Statement
