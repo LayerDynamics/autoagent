@@ -74,6 +74,15 @@ impl PathGuard {
 /// `\\srv\sh`. Verbatim paths treat `/` as a literal character rather than a
 /// separator, which breaks lexical path reasoning; the simplified form parses
 /// normally. No-op on Unix and on already-plain paths (string never matches).
+///
+/// Caveat: this strips unconditionally, whereas the `\\?\` prefix is what lets a
+/// path exceed the legacy 260-char `MAX_PATH` limit. A workspace root deep
+/// enough that its de-verbatimed run/snapshot paths cross 260 chars, on a system
+/// without long-path support, could see IO fail where the verbatim form would
+/// have worked. Realistic project roots are far under that, so the trade for
+/// `/`-as-separator semantics everywhere is worth it; the follow-up, if it ever
+/// bites, is to gate the strip on the resulting length (as the `dunce` crate
+/// does) rather than always stripping.
 pub(crate) fn simplify_verbatim(p: &Utf8Path) -> Utf8PathBuf {
     let s = p.as_str();
     if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
