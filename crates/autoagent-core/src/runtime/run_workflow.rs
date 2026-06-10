@@ -86,11 +86,16 @@ pub async fn run_workflow(
     // through plan → policy → apply → validate and is reversible; the objective
     // never changes and no gate is bypassed.
     if config.agent.autonomous && report.passed {
+        let real_root = canonical(root);
+        let mut touched: std::collections::BTreeSet<String> = op_paths(&plan);
+        let mut seen_ops: std::collections::HashSet<String> = op_signatures(&plan);
         while budget.try_consume() {
-            // Ask whether the objective is fully satisfied before doing more work.
-            // Conservative: any error/ambiguity means "complete" (stop), so the
-            // loop can never spin forever.
-            if objective_complete(objective, &history, provider).await {
+            // Grounded completion check: show the model the CURRENT contents of the
+            // files worked on and ask, strictly, whether the objective is met —
+            // so it stops when the work is already there instead of over-producing.
+            // Any error/ambiguity defaults to "complete" (stop); never loops forever.
+            let state = read_files(&real_root, &touched);
+            if objective_complete(objective, &history, &state, provider).await {
                 break;
             }
             let next_objective = continuation_objective(objective, &history);
@@ -102,6 +107,12 @@ pub async fn run_workflow(
                 provider,
             )
             .await?;
+            // No-progress backstop: if the next step only re-proposes work already
+            // applied (no new operation), the agent is churning — stop.
+            let next_sigs = op_signatures(&next_plan);
+            if next_sigs.is_subset(&seen_ops) {
+                break;
+            }
             let (rid, rep) = apply_written_plan(root, objective, &next_plan, auto_approve)?;
             run_id = rid;
             report = rep;
@@ -123,6 +134,8 @@ pub async fn run_workflow(
                     break; // could not land this step; stop autonomous progress
                 }
             }
+            seen_ops.extend(next_sigs);
+            touched.extend(op_paths(&next_plan));
             history.push(next_plan.summary.clone());
         }
     }
@@ -189,12 +202,57 @@ fn continuation_objective(objective: &str, history: &[String]) -> String {
     )
 }
 
-/// Ask the model whether the objective is fully satisfied (structured yes/no).
-/// Defaults to `true` (stop) on any error or ambiguity so autonomous mode can
-/// never loop forever. This is only a *stop* signal — it cannot start new work.
+/// The set of paths a plan touches (for tracking what's been worked on).
+fn op_paths(plan: &crate::planning::plan::Plan) -> std::collections::BTreeSet<String> {
+    plan.operations.iter().map(|o| o.path.to_string()).collect()
+}
+
+/// A content signature per operation, so re-proposing the same work is detected.
+fn op_signatures(plan: &crate::planning::plan::Plan) -> std::collections::HashSet<String> {
+    plan.operations
+        .iter()
+        .map(|o| {
+            let payload = format!(
+                "{}{}",
+                o.content.as_deref().unwrap_or(""),
+                o.anchor.as_deref().unwrap_or("")
+            );
+            format!(
+                "{}:{}:{}",
+                agent_loop::kind_str(&o.kind),
+                o.path,
+                crate::editing::snapshot_manager::sha256_hex(payload.as_bytes())
+            )
+        })
+        .collect()
+}
+
+/// Read the current contents of `paths` within the workspace (bounded), so the
+/// completion check is grounded in what actually exists now.
+fn read_files(
+    real_root: &Utf8Path,
+    paths: &std::collections::BTreeSet<String>,
+) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for p in paths.iter().take(20) {
+        let abs = real_root.join(p);
+        if let Ok(c) = std::fs::read_to_string(abs.as_std_path()) {
+            if c.len() <= 16 * 1024 {
+                out.push((p.clone(), c));
+            }
+        }
+    }
+    out
+}
+
+/// Ask the model whether the objective is satisfied, GROUNDED in the current
+/// contents of the files worked on, with a strict "do not invent extra work"
+/// rubric. Defaults to `true` (stop) on any error/ambiguity so autonomous mode
+/// can never loop forever. This is only a *stop* signal — it starts no new work.
 async fn objective_complete(
     objective: &str,
     history: &[String],
+    state: &[(String, String)],
     provider: &dyn crate::planning::llm::provider::LlmProvider,
 ) -> bool {
     use crate::planning::llm::provider::PlanRequest;
@@ -203,10 +261,22 @@ async fn objective_complete(
         .map(|h| format!("- {h}"))
         .collect::<Vec<_>>()
         .join("\n");
+    let files = if state.is_empty() {
+        "(no files yet)".to_string()
+    } else {
+        state
+            .iter()
+            .map(|(p, c)| format!("=== {p} (current contents) ===\n{c}"))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    };
     let prompt = format!(
-        "Objective: {objective}\n\nSteps already applied and validated:\n{done}\n\nIs this \
-         objective now FULLY complete, needing no further code changes? Reply with ONLY \
-         {{\"complete\": true}} or {{\"complete\": false}}."
+        "Autonomous completion check.\n\nObjective: {objective}\n\nSteps already applied:\n{done}\n\n\
+         {files}\n\nDecide STRICTLY: the objective is COMPLETE unless a SPECIFIC piece it \
+         explicitly requires is still MISSING from the files above. Do NOT invent extra functions, \
+         tests, or improvements that the objective did not ask for. If every explicitly-required \
+         piece is already present, you are done. Reply with ONLY {{\"complete\": true}} or \
+         {{\"complete\": false}}."
     );
     let schema = json!({
         "type": "object",
@@ -801,7 +871,7 @@ mod tests {
             if req.context.contains("scoping a code change") {
                 return Ok("[]".into()); // scout
             }
-            if req.context.contains("FULLY complete, needing no further") {
+            if req.context.contains("Autonomous completion check") {
                 let mut c = self.completes.lock().unwrap();
                 let done = if c.is_empty() { true } else { c.remove(0) };
                 return Ok(format!("{{\"complete\": {done}}}"));
@@ -862,6 +932,43 @@ mod tests {
         assert!(
             !root.join("crates/b.rs").as_std_path().exists(),
             "non-autonomous must not perform a second step"
+        );
+    }
+
+    #[tokio::test]
+    async fn autonomous_stops_on_no_progress_even_if_model_never_says_done() {
+        let (dir, _cfg) = workspace();
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        let mut cfg =
+            AutoAgentConfig::from_toml_str(&crate::config::default_config::default_toml()).unwrap();
+        cfg.agent.autonomous = true;
+        std::fs::write(root.join("Autoagent.toml"), toml::to_string(&cfg).unwrap()).unwrap();
+
+        // The model NEVER reports completion and keeps re-proposing the SAME op.
+        // The deterministic no-progress backstop must stop the run rather than
+        // churn through the whole budget (over-production guard).
+        let provider = AutonomousProvider {
+            plans: Mutex::new(vec![
+                plan_json("crates/a.rs", ""),
+                plan_json("crates/a.rs", ""), // identical -> no new work
+                plan_json("crates/a.rs", ""),
+            ]),
+            completes: Mutex::new(vec![false, false, false]),
+        };
+        let outcome = run_workflow(root, "create a.rs", &provider, true)
+            .await
+            .unwrap();
+        assert!(matches!(outcome.final_state, RunState::Completed));
+        assert!(root.join("crates/a.rs").as_std_path().exists());
+        // Exactly one apply happened — the re-proposed identical step was refused
+        // by the no-progress backstop, so the run did not churn.
+        let runs = std::fs::read_dir(root.join(".agent/runs"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .count();
+        assert_eq!(
+            runs, 1,
+            "no-progress backstop must stop after the first apply"
         );
     }
 }
