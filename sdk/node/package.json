@@ -1,0 +1,32 @@
+{
+  "name": "@autoagent/sdk",
+  "version": "1.0.0",
+  "description": "Typed Node.js SDK for the AutoAgent policy-controlled mutation engine",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@autoagent/native": "file:../../crates/autoagent-bingen"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/"
+  }
+}

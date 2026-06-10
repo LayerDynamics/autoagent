@@ -49,3 +49,6 @@ crates/autoagent-bingen/dist/*.dll
 *.key
 *.crt
 *.pfx
+
+# Node SDK lockfile uses a local file: dep path
+sdk/node/package-lock.json
