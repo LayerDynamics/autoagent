@@ -16,6 +16,7 @@ pub fn run(
     root: &Utf8Path,
     objective: &str,
     from: Option<PathBuf>,
+    replay: Option<String>,
     gate: &dyn ApprovalGate,
     yes: bool,
 ) -> Result<RunOutcome> {
@@ -27,6 +28,12 @@ pub fn run(
     }
     if config.agent.require_approval_before_command && !yes {
         gate.confirm_command("validation commands")?;
+    }
+
+    // Deterministic replay of a recorded session (the reproducible autonomous
+    // loop): re-apply the recorded plans in order, no model.
+    if let Some(session_id) = replay {
+        return autoagent_core::runtime::session::replay(root, &session_id);
     }
 
     if let Some(f) = from {

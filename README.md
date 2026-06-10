@@ -134,6 +134,20 @@ It is "more autonomous" only in *iteration*, not in *authority*. The bright line
 
 This is *controlled self-authoring, not uncontrolled self-replication*: autonomy of execution toward your goal, never autonomy from the safety contract.
 
+### Two kinds of loop: short-iterative and reproducible-autonomous
+
+AutoAgent's loops come in two complementary kinds:
+
+- **Short iterative loop** — the tight, fast inner loop: the agentic read-edit-observe loop (the model calls `read_file`/`grep`/`run_command`, observes, then plans) and the repair loop (revert → re-plan against the failure). Live, model-driven, bounded, used to land *one* validated change quickly.
+- **Reproducible autonomous loop** — the outer loop: every plan an autonomous `run` applies is recorded, in order, as a **session**. A completed run prints a session id, and:
+
+  ```bash
+  autoagent run "build the X feature end to end"     # autonomous; prints: reproducible session: <id>
+  autoagent run --replay <id>                         # re-applies the exact steps deterministically — no model
+  ```
+
+  Replay runs **no model**: it re-applies the recorded plans in order through the same policy-gated, snapshotted, reversible apply path, reproducing the result **bit-for-bit**. So a nondeterministic, model-driven autonomous session becomes a deterministic, auditable, repeatable artifact — to reproduce a result on another machine, in CI, or after a `revert`, replay its session.
+
 ## Commands
 
 | Command | Purpose | Default write behavior |

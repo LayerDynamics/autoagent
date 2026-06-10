@@ -56,6 +56,7 @@ export interface RunOutcome {
   final_state: RunState;
   report: ValidationReport;
   run_id: string;
+  session_id: string | null;
 }
 
 export type RunState = "Created" | "LoadingConfig" | "AnalyzingProject" | "LoadingMemory" | "Planning" | "AwaitingApproval" | "Snapshotting" | "ApplyingChanges" | "Validating" | "Repairing" | "Completed" | "Failed" | "Reverted";

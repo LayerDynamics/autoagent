@@ -46,10 +46,15 @@ enum Command {
     Apply { plan: PathBuf },
     /// Plan, apply, validate, and report in a supervised workflow.
     Run {
+        #[arg(default_value = "")]
         objective: String,
         /// Run an existing JSON plan instead of generating one.
         #[arg(long)]
         from: Option<PathBuf>,
+        /// Replay a recorded session deterministically (no model), reproducing
+        /// the exact multi-step change. Pass the session id from a prior run.
+        #[arg(long)]
+        replay: Option<String>,
     },
     /// Create a controlled self-authoring plan for AutoAgent itself.
     Evolve {
@@ -167,9 +172,18 @@ fn run(cli: Cli) -> Result<()> {
             let run_id = agent_loop::apply_with_gate(&root, &plan_path, gate)?;
             println!("applied run {run_id}");
         }
-        Command::Run { objective, from } => {
-            let outcome = commands::run(&root, &objective, from, gate, cli.yes)?;
+        Command::Run {
+            objective,
+            from,
+            replay,
+        } => {
+            let outcome = commands::run(&root, &objective, from, replay, gate, cli.yes)?;
             println!("run {} — {:?}", outcome.run_id, outcome.final_state);
+            if let Some(sid) = &outcome.session_id {
+                println!(
+                    "reproducible session: {sid}  (replay with: autoagent run --replay {sid})"
+                );
+            }
             if !matches!(
                 outcome.final_state,
                 autoagent_core::runtime::run_state::RunState::Completed

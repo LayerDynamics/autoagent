@@ -275,6 +275,14 @@
         },
         "run_id": {
           "type": "string"
+        },
+        "session_id": {
+          "default": null,
+          "description": "The id of the reproducible session this run recorded (present on a\ncompleted `run`), which `run --replay <id>` re-applies deterministically.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

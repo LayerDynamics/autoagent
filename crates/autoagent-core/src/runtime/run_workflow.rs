@@ -25,6 +25,10 @@ pub struct RunOutcome {
     pub run_id: String,
     pub final_state: RunState,
     pub report: ValidationReport,
+    /// The id of the reproducible session this run recorded (present on a
+    /// completed `run`), which `run --replay <id>` re-applies deterministically.
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 /// Run a supervised workflow from an existing plan file (no repair — there is
@@ -64,9 +68,12 @@ pub async fn run_workflow(
     .await?;
     let (mut run_id, mut report) = apply_written_plan(root, objective, &plan, auto_approve)?;
     let mut history = vec![plan.summary.clone()];
+    // The ordered plans whose changes are retained in the final tree — the
+    // reproducible record this run records as a replayable session.
+    let mut applied_plans: Vec<crate::planning::plan::Plan> = vec![plan.clone()];
 
     if !report.passed {
-        let (rid, rep) = repair_to_pass(
+        let (rid, rep, repaired) = repair_to_pass(
             root,
             objective,
             &config,
@@ -79,6 +86,12 @@ pub async fn run_workflow(
         .await?;
         run_id = rid;
         report = rep;
+        // The failed cycle-1 plan was reverted; its retained replacement (if the
+        // repair landed) is the passing repair plan.
+        applied_plans.clear();
+        if let Some(p) = repaired {
+            applied_plans.push(p);
+        }
     }
 
     // Bounded autonomous continuation (opt-in). Keep performing the NEXT concrete
@@ -118,8 +131,11 @@ pub async fn run_workflow(
             let (rid, rep) = apply_written_plan(root, objective, &next_plan, auto_approve)?;
             run_id = rid;
             report = rep;
+            // The retained plan for this step is the forward plan, unless it was
+            // repaired (revert + re-plan), in which case it is the repair plan.
+            let mut step_plan = next_plan.clone();
             if !report.passed {
-                let (rid, rep) = repair_to_pass(
+                let (rid, rep, repaired) = repair_to_pass(
                     root,
                     objective,
                     &config,
@@ -135,18 +151,30 @@ pub async fn run_workflow(
                 if !report.passed {
                     break; // could not land this step; stop autonomous progress
                 }
+                if let Some(p) = repaired {
+                    step_plan = p;
+                }
             }
+            applied_plans.push(step_plan);
             seen_ops.extend(next_sigs);
             touched.extend(op_paths(&next_plan));
             history.push(next_plan.summary.clone());
         }
     }
 
+    // Record the reproducible session (best-effort: a session-write failure must
+    // not fail an already-completed run).
+    let session_id = if report.passed && !applied_plans.is_empty() {
+        crate::runtime::session::record(root, &config, objective, &applied_plans).ok()
+    } else {
+        None
+    };
+
     if report.passed {
         record_decision(root, &config, &run_id, objective);
     }
 
-    Ok(finish_outcome(run_id, report))
+    Ok(finish_outcome_with_session(run_id, report, session_id))
 }
 
 /// Revert-and-re-plan repair loop, shared by the first cycle and (in autonomous
@@ -161,8 +189,15 @@ async fn repair_to_pass(
     mut run_id: String,
     mut report: ValidationReport,
     budget: &mut StepBudget,
-) -> Result<(String, ValidationReport)> {
+) -> Result<(
+    String,
+    ValidationReport,
+    Option<crate::planning::plan::Plan>,
+)> {
     let real_root = canonical(root);
+    // The repair plan whose changes are retained (the last one applied). Used to
+    // record the reproducible session faithfully.
+    let mut applied: Option<crate::planning::plan::Plan> = None;
     while !report.passed && budget.try_consume() {
         // Capture what the failed attempt authored BEFORE reverting it, so the
         // repair can fix the specific defect instead of re-guessing from scratch.
@@ -186,8 +221,9 @@ async fn repair_to_pass(
         let (rid, rep) = apply_written_plan(root, objective, &repair_plan, auto_approve)?;
         run_id = rid;
         report = rep;
+        applied = Some(repair_plan);
     }
-    Ok((run_id, report))
+    Ok((run_id, report, applied))
 }
 
 /// Prompt for the next autonomous step: pursue the SAME objective. The agent
@@ -561,6 +597,14 @@ fn rerecord_after(real_root: &Utf8Path, config: &AutoAgentConfig, run_id: &str) 
 }
 
 fn finish_outcome(run_id: String, report: ValidationReport) -> RunOutcome {
+    finish_outcome_with_session(run_id, report, None)
+}
+
+fn finish_outcome_with_session(
+    run_id: String,
+    report: ValidationReport,
+    session_id: Option<String>,
+) -> RunOutcome {
     let final_state = if report.passed {
         RunState::Completed
     } else {
@@ -570,6 +614,7 @@ fn finish_outcome(run_id: String, report: ValidationReport) -> RunOutcome {
         run_id,
         final_state,
         report,
+        session_id,
     }
 }
 

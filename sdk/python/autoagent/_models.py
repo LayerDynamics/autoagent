@@ -124,6 +124,7 @@ class RunOutcome:
     final_state: RunState
     report: ValidationReport
     run_id: str
+    session_id: Optional[str]
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "RunOutcome":
@@ -131,6 +132,7 @@ class RunOutcome:
             final_state=d.get("final_state"),
             report=ValidationReport.from_dict(d.get("report")),
             run_id=d.get("run_id"),
+            session_id=d.get("session_id"),
         )
 
 RunState = Literal["Created", "LoadingConfig", "AnalyzingProject", "LoadingMemory", "Planning", "AwaitingApproval", "Snapshotting", "ApplyingChanges", "Validating", "Repairing", "Completed", "Failed", "Reverted"]
