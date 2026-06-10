@@ -1,0 +1,16 @@
+# Normalize all text to LF in the repo so generated golden files (checked by the
+# bingen drift guard) compare identically on Windows checkouts. Without this,
+# Git's autocrlf would rewrite them to CRLF and the drift test would fail.
+* text=auto eol=lf
+
+# Binary artifacts must never be line-ending-normalized.
+*.png binary
+*.jpg binary
+*.ico binary
+*.node binary
+*.so binary
+*.dylib binary
+*.dll binary
+*.wasm binary
+*.whl binary
+*.rlib binary
