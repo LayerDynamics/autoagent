@@ -180,8 +180,13 @@ fn apply_and_validate(
     let plan = plan_reader::read_plan(plan_path)?;
     let engine = PolicyEngine::from_config(&config, real_root.clone());
 
-    let mut report =
-        command_runner::run_all(&plan.validation_commands, real_root.clone(), &engine)?;
+    // Authoritative validation: ALWAYS run the project's configured correctness
+    // gate (build + test) in addition to whatever the model proposed, so a plan
+    // that omits or under-specifies validation can never be reported Completed
+    // on an unverified change. Config commands are policy-filtered (silently
+    // skipped if not allowed) since they are system-added, not model-requested.
+    let commands = authoritative_commands(&real_root, &config, &plan.validation_commands, &engine);
+    let mut report = command_runner::run_all(&commands, real_root.clone(), &engine)?;
 
     // Deterministic auto-heal: mechanical failures (formatting, autofixable
     // lints) are fixed by the trusted runtime — no model round-trip — then the
@@ -189,7 +194,7 @@ fn apply_and_validate(
     // suite is re-validated. This eliminates a whole class of repair iterations.
     if !report.passed && auto_heal(&real_root, &report) {
         rerecord_after(&real_root, &config, &run_id)?;
-        report = command_runner::run_all(&plan.validation_commands, real_root.clone(), &engine)?;
+        report = command_runner::run_all(&commands, real_root.clone(), &engine)?;
     }
 
     let run_dir = real_root.join(&config.runs.directory).join(&run_id);
@@ -223,6 +228,47 @@ fn apply_and_validate(
     }
 
     Ok((run_id, report))
+}
+
+/// The validation set actually run: the project's configured correctness gate
+/// (build + test, when non-empty and policy-allowed) followed by the model's
+/// proposed commands, de-duplicated. This makes "Completed" mean the project's
+/// real build/test passed, regardless of what the plan asked for.
+fn authoritative_commands(
+    root: &Utf8Path,
+    config: &AutoAgentConfig,
+    plan_cmds: &[String],
+    engine: &PolicyEngine,
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for c in [&config.commands.build, &config.commands.test] {
+        let c = c.trim().to_string();
+        if !c.is_empty()
+            && !out.contains(&c)
+            && command_applicable(&c, root)
+            && engine.check_command(&c).is_ok()
+        {
+            out.push(c);
+        }
+    }
+    for c in plan_cmds {
+        if !out.contains(c) {
+            out.push(c.clone());
+        }
+    }
+    out
+}
+
+/// Whether a configured command can run in this workspace. A `cargo` command
+/// needs a `Cargo.toml`; otherwise it would error on a non-Rust project and turn
+/// every run into a false failure. Non-cargo commands are assumed applicable.
+fn command_applicable(cmd: &str, root: &Utf8Path) -> bool {
+    let c = cmd.trim_start();
+    if c == "cargo" || c.starts_with("cargo ") {
+        root.join("Cargo.toml").as_std_path().exists()
+    } else {
+        true
+    }
 }
 
 /// Deterministically fix mechanical validation failures (formatting, autofixable
@@ -372,9 +418,13 @@ mod tests {
         .unwrap();
         std::fs::write(
             root.join("Cargo.toml"),
-            "[package]\nname=\"x\"\nversion=\"0.1.0\"",
+            "[package]\nname=\"x\"\nversion=\"0.1.0\"\nedition=\"2021\"\n",
         )
         .unwrap();
+        // A buildable crate so the now-authoritative `cargo build`/`cargo test`
+        // validation actually has targets and passes for a clean change.
+        std::fs::create_dir_all(root.join("src").as_std_path()).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "pub fn ok() {}\n").unwrap();
         let cfg = AutoAgentConfig::load(root).unwrap();
         (dir, cfg)
     }
@@ -468,6 +518,48 @@ mod tests {
             std::fs::read_to_string(root.join("src/keep.rs")).unwrap(),
             "ORIGINAL",
             "destructive attempt must be reverted before repair"
+        );
+    }
+
+    #[test]
+    fn authoritative_validation_always_includes_build_and_test() {
+        let (dir, cfg) = workspace(); // has a Cargo.toml -> cargo commands apply
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        let engine = PolicyEngine::from_config(&cfg, root.to_path_buf());
+        // Model proposed only a test command; build must still be added, and the
+        // duplicate `cargo test` must not appear twice.
+        let cmds = authoritative_commands(root, &cfg, &["cargo test".to_string()], &engine);
+        assert!(cmds.contains(&"cargo build".to_string()), "must add build");
+        assert_eq!(
+            cmds.iter().filter(|c| *c == "cargo test").count(),
+            1,
+            "no duplicate test command"
+        );
+        // A model command not in the configured gate is preserved.
+        let cmds2 = authoritative_commands(root, &cfg, &["cargo doc".to_string()], &engine);
+        assert!(cmds2.contains(&"cargo build".to_string()));
+        assert!(cmds2.contains(&"cargo test".to_string()));
+        assert!(cmds2.contains(&"cargo doc".to_string()));
+    }
+
+    #[test]
+    fn authoritative_validation_skips_cargo_without_manifest() {
+        // A non-Rust workspace (no Cargo.toml) must NOT have cargo build/test
+        // forced onto it — that would turn every run into a false failure.
+        let dir = tempfile::tempdir().unwrap();
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        std::fs::write(
+            root.join("Autoagent.toml"),
+            crate::config::default_config::default_toml(),
+        )
+        .unwrap();
+        let cfg = AutoAgentConfig::load(root).unwrap();
+        let engine = PolicyEngine::from_config(&cfg, root.to_path_buf());
+        let cmds = authoritative_commands(root, &cfg, &["git status".to_string()], &engine);
+        assert_eq!(
+            cmds,
+            vec!["git status".to_string()],
+            "no cargo without Cargo.toml"
         );
     }
 
