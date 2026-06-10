@@ -7,7 +7,10 @@
 //!   binding wiring works (FR-12).
 
 use anyhow::{Context, Result};
+use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 pub mod emit;
 
@@ -16,14 +19,53 @@ pub use emit::render_all;
 /// Crate root (`crates/autoagent-bingen`) — the base for all generated paths.
 const ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
+/// Format Rust source through `rustfmt` so generated files pass `cargo fmt
+/// --check`. Returns the input unchanged if rustfmt is unavailable or errors.
+fn rustfmt(content: &str) -> String {
+    let mut child = match Command::new("rustfmt")
+        .args(["--edition", "2021", "--emit", "stdout"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return content.to_string(),
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(content.as_bytes());
+    }
+    match child.wait_with_output() {
+        Ok(out) if out.status.success() => {
+            String::from_utf8(out.stdout).unwrap_or_else(|_| content.to_string())
+        }
+        _ => content.to_string(),
+    }
+}
+
+/// The canonical generated files: every `.rs` output passed through rustfmt so
+/// the committed golden, `generate`, and `check` all agree byte-for-byte.
+fn finalized() -> BTreeMap<String, String> {
+    render_all()
+        .into_iter()
+        .map(|(rel, content)| {
+            let content = if rel.ends_with(".rs") {
+                rustfmt(&content)
+            } else {
+                content
+            };
+            (rel, content)
+        })
+        .collect()
+}
+
 /// Write all generated files to disk, creating parent directories as needed.
 pub fn generate() -> Result<()> {
-    let files = render_all();
+    let files = finalized();
     for (rel, content) in &files {
         let path = Path::new(ROOT).join(rel);
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("create dir for {rel}"))?;
+            std::fs::create_dir_all(parent).with_context(|| format!("create dir for {rel}"))?;
         }
         std::fs::write(&path, content).with_context(|| format!("write {rel}"))?;
         println!("generated {rel}");
@@ -35,7 +77,7 @@ pub fn generate() -> Result<()> {
 /// Drift guard: fail if any generated file on disk differs from a fresh render.
 pub fn check() -> Result<()> {
     let mut drift = Vec::new();
-    for (rel, content) in render_all() {
+    for (rel, content) in finalized() {
         let path = Path::new(ROOT).join(&rel);
         let on_disk = std::fs::read_to_string(&path).unwrap_or_default();
         if on_disk != content {

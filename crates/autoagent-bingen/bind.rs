@@ -238,9 +238,8 @@ pub fn patch_show(root: &str, run_id: &str) -> BindResult {
 pub fn memory_show(root: &str) -> BindResult {
     let root = utf8(root)?;
     let cfg = autoagent_core::config::config_schema::AutoAgentConfig::load(root)?;
-    let store = autoagent_core::memory::memory_store::MemoryStore::new(
-        root.join(&cfg.memory.directory),
-    );
+    let store =
+        autoagent_core::memory::memory_store::MemoryStore::new(root.join(&cfg.memory.directory));
     let pm = store.load_project()?;
     let decisions = store.load_decisions()?;
     let summary = serde_json::json!({
@@ -318,7 +317,8 @@ pub fn run_sync(root: &str, objective: &str, plan_path: Option<&str>, approve: b
     // CLI does. When `approve` is false this refuses fail-closed.
     let gate = gate_for(approve);
     if config.agent.require_approval_before_write && !approve {
-        gate.confirm_write("planned changes").map_err(BindError::from)?;
+        gate.confirm_write("planned changes")
+            .map_err(BindError::from)?;
     }
     if config.agent.require_approval_before_command && !approve {
         gate.confirm_command("validation commands")
@@ -349,7 +349,12 @@ pub fn run_sync(root: &str, objective: &str, plan_path: Option<&str>, approve: b
 /// self-plan, plan-only unless `apply` is set (which is itself gated by
 /// `allow_self_modification` in core). Returns a serialized `EvolveOutcome`.
 /// The async backend variants wrap this on a blocking thread.
-pub fn evolve_sync(root: &str, objective: &str, plan_path: Option<&str>, apply: bool) -> BindResult {
+pub fn evolve_sync(
+    root: &str,
+    objective: &str,
+    plan_path: Option<&str>,
+    apply: bool,
+) -> BindResult {
     let root = utf8(root)?;
     let config = AutoAgentConfig::load(root)?;
 

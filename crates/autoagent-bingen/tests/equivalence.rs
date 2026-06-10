@@ -29,7 +29,9 @@ fn every_backend_exposes_the_same_read_surface() {
     ];
     for name in wired_read_names() {
         for backend in rust_backends {
-            let src = out.get(backend).unwrap_or_else(|| panic!("missing {backend}"));
+            let src = out
+                .get(backend)
+                .unwrap_or_else(|| panic!("missing {backend}"));
             assert!(
                 src.contains(name),
                 "backend {backend} is missing read symbol `{name}`"
@@ -43,7 +45,13 @@ fn deno_ts_and_node_dts_share_camel_surface() {
     let out = gen::render_all();
     let dts = &out["dist/index.d.ts"];
     let modts = &out["deno/mod.ts"];
-    for cam in ["doctor", "configShow", "patchList", "memoryShow", "toolsList"] {
+    for cam in [
+        "doctor",
+        "configShow",
+        "patchList",
+        "memoryShow",
+        "toolsList",
+    ] {
         assert!(dts.contains(cam), ".d.ts missing {cam}");
         assert!(modts.contains(cam), "mod.ts missing {cam}");
     }

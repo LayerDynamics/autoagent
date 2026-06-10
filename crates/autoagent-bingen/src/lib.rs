@@ -13,6 +13,6 @@ pub mod bind;
 
 pub mod gen;
 
+pub mod deno;
 pub mod node;
 pub mod python;
-pub mod deno;

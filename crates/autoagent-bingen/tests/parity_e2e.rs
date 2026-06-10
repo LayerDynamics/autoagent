@@ -25,7 +25,11 @@ fn cli_binary() -> PathBuf {
     assert!(status.success(), "failed to build autoagent-cli");
 
     let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
-    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
+    let profile = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
     let exe = if cfg!(windows) {
         "autoagent.exe"
     } else {
@@ -51,7 +55,7 @@ fn only_patch(root: &Path) -> String {
         .expect("patches dir exists")
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.extension().map_or(false, |x| x == "patch"))
+        .filter(|p| p.extension().is_some_and(|x| x == "patch"))
         .collect();
     patches.sort();
     assert_eq!(patches.len(), 1, "expected exactly one patch in {dir:?}");
@@ -66,12 +70,9 @@ fn binding_apply_matches_cli_apply_and_reverts() {
     let cplan = seed(cdir.path());
 
     // Binding path: in-process, real core, real policy engine.
-    let run_b = autoagent_bingen::bind::apply(
-        bdir.path().to_str().unwrap(),
-        bplan.to_str().unwrap(),
-        true,
-    )
-    .expect("binding apply");
+    let run_b =
+        autoagent_bingen::bind::apply(bdir.path().to_str().unwrap(), bplan.to_str().unwrap(), true)
+            .expect("binding apply");
 
     // CLI path: the real `autoagent` binary on the twin workspace.
     let cli = cli_binary();

@@ -22,7 +22,10 @@ fn registry_covers_full_cli_parity() {
         "tools_list",
         "version",
     ] {
-        assert!(names.contains(&required), "missing surface symbol: {required}");
+        assert!(
+            names.contains(&required),
+            "missing surface symbol: {required}"
+        );
     }
 }
 

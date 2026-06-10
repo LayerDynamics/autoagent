@@ -7,9 +7,7 @@
 
 /// Public accessor for the native module definition (the `#[pymodule]` macro's
 /// own `module_def` is `pub(crate)` and cannot be re-exported).
-pub fn module_def(
-    ctx: &rustpython_vm::Context,
-) -> &'static rustpython_vm::builtins::PyModuleDef {
+pub fn module_def(ctx: &rustpython_vm::Context) -> &'static rustpython_vm::builtins::PyModuleDef {
     autoagent::module_def(ctx)
 }
 
@@ -24,7 +22,9 @@ mod autoagent {
 
     #[pyfunction]
     fn version(vm: &VirtualMachine) -> PyResult<u32> {
-        bind::version().map(|v| v.trim().parse().unwrap_or(0)).map_err(|e| err(e, vm))
+        bind::version()
+            .map(|v| v.trim().parse().unwrap_or(0))
+            .map_err(|e| err(e, vm))
     }
 
     #[pyfunction]
@@ -39,26 +39,47 @@ mod autoagent {
 
     #[pyfunction]
     fn init(root: String, vm: &VirtualMachine) -> PyResult<bool> {
-        bind::init(&root).map(|v| v.trim() == "true").map_err(|e| err(e, vm))
+        bind::init(&root)
+            .map(|v| v.trim() == "true")
+            .map_err(|e| err(e, vm))
     }
 
     #[pyfunction]
-    fn apply(root: String, plan_path: String, approve: bool, vm: &VirtualMachine) -> PyResult<String> {
+    fn apply(
+        root: String,
+        plan_path: String,
+        approve: bool,
+        vm: &VirtualMachine,
+    ) -> PyResult<String> {
         bind::apply(&root, &plan_path, approve).map_err(|e| err(e, vm))
     }
 
     #[pyfunction]
     fn revert(root: String, run_id: String, vm: &VirtualMachine) -> PyResult<()> {
-        bind::revert(&root, &run_id).map(|_| ()).map_err(|e| err(e, vm))
+        bind::revert(&root, &run_id)
+            .map(|_| ())
+            .map_err(|e| err(e, vm))
     }
 
     #[pyfunction]
-    fn run_sync(root: String, objective: String, from: Option<String>, approve: bool, vm: &VirtualMachine) -> PyResult<String> {
+    fn run_sync(
+        root: String,
+        objective: String,
+        from: Option<String>,
+        approve: bool,
+        vm: &VirtualMachine,
+    ) -> PyResult<String> {
         bind::run_sync(&root, &objective, from.as_deref(), approve).map_err(|e| err(e, vm))
     }
 
     #[pyfunction]
-    fn evolve_sync(root: String, objective: String, from: Option<String>, apply: bool, vm: &VirtualMachine) -> PyResult<String> {
+    fn evolve_sync(
+        root: String,
+        objective: String,
+        from: Option<String>,
+        apply: bool,
+        vm: &VirtualMachine,
+    ) -> PyResult<String> {
         bind::evolve_sync(&root, &objective, from.as_deref(), apply).map_err(|e| err(e, vm))
     }
 
@@ -86,5 +107,4 @@ mod autoagent {
     fn tools_list(root: String, vm: &VirtualMachine) -> PyResult<String> {
         bind::tools_list(&root).map_err(|e| err(e, vm))
     }
-
 }

@@ -24,9 +24,7 @@ fn generate_emits_napi_and_dts_and_schema() {
 #[test]
 fn generate_emits_pyo3_and_pyi() {
     let out = gen::render_all();
-    let py = out
-        .get("src/python/pyrs.rs")
-        .expect("pyo3 backend emitted");
+    let py = out.get("src/python/pyrs.rs").expect("pyo3 backend emitted");
     assert!(py.contains("#[pyfunction]"));
     assert!(py.contains("#[pymodule]"));
     assert!(py.contains("create_exception!"));

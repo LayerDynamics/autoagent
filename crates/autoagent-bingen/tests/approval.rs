@@ -36,5 +36,9 @@ fn denial_carries_policy_code() {
     // A refusal must surface as a policy error so the host sees `policy.*`.
     let gate = CallbackGate::deny_all();
     let err = gate.confirm_write("crates/x.rs").unwrap_err();
-    assert!(err.error_code().starts_with("policy"), "got {}", err.error_code());
+    assert!(
+        err.error_code().starts_with("policy"),
+        "got {}",
+        err.error_code()
+    );
 }
