@@ -1,0 +1,131 @@
+name: bingen-release
+
+# Publishes the AutoAgent native bindings on a bingen tag:
+#   npm  → @autoagent/native (per-platform napi .node prebuilds)
+#   PyPI → autoagent (abi3 wheels via maturin)
+#   JSR  → @autoagent/native (Deno module)
+on:
+  push:
+    tags:
+      - "bingen-v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Gate the whole release on no drift + a fmt/clippy-clean tree.
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo run -p autoagent-bingen --bin bingen -- check
+      - run: cargo fmt --all -- --check
+
+  # Build the napi .node prebuild for each platform → upload as artifacts.
+  npm-build:
+    needs: gate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            triple: darwin-arm64
+            ext: dylib
+          - os: macos-13
+            target: x86_64-apple-darwin
+            triple: darwin-x64
+            ext: dylib
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            triple: linux-x64-gnu
+            ext: so
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            triple: win32-x64-msvc
+            ext: dll
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Build napi cdylib
+        run: cargo build -p autoagent-bingen --features node-napi --release --lib --target ${{ matrix.target }}
+      - name: Rename to platform .node
+        shell: bash
+        run: |
+          mkdir -p crates/autoagent-bingen/dist
+          src="target/${{ matrix.target }}/release/$([ "${{ matrix.ext }}" = dll ] && echo '' || echo lib)autoagent_bingen.${{ matrix.ext }}"
+          cp "$src" "crates/autoagent-bingen/dist/autoagent.${{ matrix.triple }}.node"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: node-${{ matrix.triple }}
+          path: crates/autoagent-bingen/dist/autoagent.${{ matrix.triple }}.node
+
+  npm-publish:
+    needs: npm-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Assemble dist/
+        shell: bash
+        run: |
+          mkdir -p crates/autoagent-bingen/dist
+          find artifacts -name '*.node' -exec cp {} crates/autoagent-bingen/dist/ \;
+      - name: Publish to npm
+        working-directory: crates/autoagent-bingen
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # Build + publish abi3 wheels via maturin (PyPI trusted publishing / OIDC).
+  pypi:
+    needs: gate
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, macos-13, windows-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheel
+        working-directory: crates/autoagent-bingen
+        run: |
+          pip install maturin
+          maturin build --release --features py-pyo3 --out dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: crates/autoagent-bingen/dist
+
+  # Publish the Deno module to JSR.
+  jsr:
+    needs: gate
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Publish to JSR
+        working-directory: crates/autoagent-bingen
+        run: deno publish

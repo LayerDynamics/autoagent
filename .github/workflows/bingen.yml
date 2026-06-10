@@ -1,0 +1,140 @@
+name: bingen
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/autoagent-bingen/**"
+      - "crates/autoagent-core/**"
+      - ".github/workflows/bingen.yml"
+  pull_request:
+    paths:
+      - "crates/autoagent-bingen/**"
+      - "crates/autoagent-core/**"
+      - ".github/workflows/bingen.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Gate: generated files must match a fresh regeneration, fmt + clippy clean.
+  gen-gate:
+    name: drift · fmt · clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Regenerate and assert no drift
+        run: cargo run -p autoagent-bingen --bin bingen -- check
+      - name: Format check
+        run: cargo fmt --all -- --check
+      - name: Clippy (default)
+        run: cargo clippy -p autoagent-bingen --all-targets -- -D warnings
+      - name: Clippy (each backend)
+        run: |
+          for f in node-napi py-rustpython deno-ffi deno-bindgen; do
+            cargo clippy -p autoagent-bingen --features "$f" --lib -- -D warnings
+          done
+          RUSTFLAGS="-C link-dead-code" cargo clippy -p autoagent-bingen --features node-bindgen --lib -- -D warnings
+
+  # Rust unit + integration tests (incl. the safety-parity E2E) per OS.
+  rust:
+    name: rust tests · ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test bingen (default features)
+        run: cargo test -p autoagent-bingen
+      - name: RustPython backend smoke
+        run: cargo test -p autoagent-bingen --features py-rustpython --test rustpython
+
+  # Node backends: napi (primary) + node-bindgen (alternative).
+  node:
+    name: node backends · ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: napi smoke (build cdylib + load from Node)
+        run: cargo run -p autoagent-bingen --bin bingen -- smoke
+      - name: napi approval test
+        run: node --test crates/autoagent-bingen/__test__/approval.test.mjs
+      - name: node-bindgen build + smoke
+        shell: bash
+        run: |
+          RUSTFLAGS="-C link-dead-code" cargo build -p autoagent-bingen --features node-bindgen --release --lib
+          node crates/autoagent-bingen/__test__/node_bindgen.smoke.mjs
+
+  # Python: pyo3 (abi3 wheel) primary.
+  python:
+    name: pyo3 · ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install maturin + pytest
+        run: pip install maturin pytest
+      - name: Build + test
+        working-directory: crates/autoagent-bingen
+        run: |
+          maturin develop --features py-pyo3
+          pytest tests_py -q
+
+  # Deno backends: deno_bindgen (primary) + raw FFI (alternative).
+  deno:
+    name: deno backends · ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: ext
+        id: ext
+        shell: bash
+        run: echo "ext=$([ "$RUNNER_OS" = "macOS" ] && echo dylib || echo so)" >> "$GITHUB_OUTPUT"
+      - name: deno_bindgen build + codegen + smoke
+        shell: bash
+        run: |
+          cargo build -p autoagent-bingen --features deno-bindgen --release --lib
+          META=$(find target/release/build -path '*autoagent-bingen*/out/bindings.json' | head -1)
+          deno run -A crates/autoagent-bingen/deno/gen.ts "$META" "../../../target/release"
+          export AUTOAGENT_BINGEN_LIB="$PWD/target/release/libautoagent_bingen.${{ steps.ext.outputs.ext }}"
+          deno run --allow-ffi --allow-read --allow-write --allow-env crates/autoagent-bingen/deno/smoke_bindgen.ts
+      - name: raw FFI build + smoke
+        shell: bash
+        run: |
+          cargo build -p autoagent-bingen --features deno-ffi --release --lib
+          export AUTOAGENT_BINGEN_LIB="$PWD/target/release/libautoagent_bingen.${{ steps.ext.outputs.ext }}"
+          deno run --allow-ffi --allow-read --allow-write --allow-env crates/autoagent-bingen/deno/smoke.ts
