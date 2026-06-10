@@ -2,13 +2,13 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ValidationReport {
     pub passed: bool,
     pub commands: Vec<CommandValidationResult>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CommandValidationResult {
     pub command: String,
     pub exit_code: Option<i32>,

@@ -6,7 +6,7 @@
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 pub enum LanguageKind {
     Rust,
     JavaScript,
@@ -15,7 +15,7 @@ pub enum LanguageKind {
     Unknown,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 pub enum PackageManager {
     Cargo,
     Npm,
@@ -23,15 +23,18 @@ pub enum PackageManager {
     Yarn,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DependencySummary {
     pub name: String,
     pub version: String,
     pub dev: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProjectAnalysis {
+    // `Utf8PathBuf` has no JsonSchema impl (camino lacks a schemars feature); it
+    // serializes as a string, so describe it as one in the schema.
+    #[schemars(with = "String")]
     pub root: Utf8PathBuf,
     pub language: LanguageKind,
     pub package_manager: Option<PackageManager>,
@@ -63,5 +66,12 @@ mod tests {
         let j = serde_json::to_string(&a).unwrap();
         assert!(j.contains("\"language\":\"Rust\""));
         assert!(j.contains("serde"));
+    }
+
+    #[test]
+    fn project_analysis_has_json_schema() {
+        let schema = schemars::schema_for!(ProjectAnalysis);
+        let json = serde_json::to_string(&schema).unwrap();
+        assert!(json.contains("source_files"));
     }
 }

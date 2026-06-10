@@ -4,14 +4,14 @@
 use crate::config::config_schema::AutoAgentConfig;
 use camino::Utf8Path;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct Check {
     pub name: String,
     pub ok: bool,
     pub detail: String,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct DoctorReport {
     pub checks: Vec<Check>,
 }
