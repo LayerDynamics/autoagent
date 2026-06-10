@@ -21,9 +21,10 @@ cargo test -p autoagent-bingen
 echo "== drift guard =="
 cargo run -q -p autoagent-bingen --bin bingen -- check
 
-echo "== napi (Node primary): build + smoke + approval =="
+echo "== napi (Node primary): build + smoke + approval + async (FR-5) =="
 cargo run -q -p autoagent-bingen --bin bingen -- smoke
 node --test "$ROOT/crates/autoagent-bingen/__test__/approval.test.mjs"
+node --test "$ROOT/crates/autoagent-bingen/__test__/async.test.mjs"
 
 echo "== node-bindgen (Node alternative): needs -C link-dead-code =="
 RUSTFLAGS="-C link-dead-code" cargo build -q -p autoagent-bingen --features node-bindgen --release --lib
