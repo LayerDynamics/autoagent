@@ -22,15 +22,19 @@ use camino::{Utf8Path, Utf8PathBuf};
 const MAX_ROUNDS: u32 = 10;
 
 /// Generate a plan, preferring the agentic tool-use loop when available.
+/// `approved` is the run's command-approval decision: when true, the model's
+/// `run_command` tool may run clean unknown commands (so it can pursue the tools
+/// the task needs); when false it is limited to allow-listed commands.
 pub async fn generate_plan_agentic(
     kind: PromptKind,
     objective: &str,
     config: &AutoAgentConfig,
     root: &Utf8Path,
     provider: &dyn LlmProvider,
+    approved: bool,
 ) -> Result<Plan> {
     if provider.supports_tools() {
-        if let Ok(plan) = agentic_loop(kind, objective, config, root, provider).await {
+        if let Ok(plan) = agentic_loop(kind, objective, config, root, provider, approved).await {
             return Ok(plan);
         }
         // Any failure (no tool support at runtime, malformed plan, budget
@@ -45,6 +49,7 @@ async fn agentic_loop(
     config: &AutoAgentConfig,
     root: &Utf8Path,
     provider: &dyn LlmProvider,
+    approved: bool,
 ) -> Result<Plan> {
     let analysis = project_analyzer::analyze(root, config)?;
     let store = crate::memory::memory_store::MemoryStore::new(root.join(&config.memory.directory));
@@ -72,7 +77,7 @@ async fn agentic_loop(
         match provider.converse(&msgs, &tools).await? {
             Turn::ToolCalls(calls) => {
                 for call in &calls {
-                    let observation = agent_tools::dispatch(call, root, config, &engine);
+                    let observation = agent_tools::dispatch(call, root, config, &engine, approved);
                     msgs.push(Message {
                         role: "assistant".into(),
                         content: format!("(tool call) {} {}", call.name, call.arguments),
@@ -196,7 +201,7 @@ mod tests {
             ]),
             saw_tool_observation: Mutex::new(false),
         };
-        let plan = generate_plan_agentic(PromptKind::Project, "do x", &cfg, root, &provider)
+        let plan = generate_plan_agentic(PromptKind::Project, "do x", &cfg, root, &provider, true)
             .await
             .unwrap();
         assert_eq!(plan.operations.len(), 1);
@@ -221,7 +226,7 @@ mod tests {
                 Ok(PLAN.into())
             }
         }
-        let plan = generate_plan_agentic(PromptKind::Project, "do x", &cfg, root, &OneShot)
+        let plan = generate_plan_agentic(PromptKind::Project, "do x", &cfg, root, &OneShot, false)
             .await
             .unwrap();
         assert_eq!(plan.operations.len(), 1);

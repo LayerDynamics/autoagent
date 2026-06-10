@@ -59,6 +59,7 @@ pub async fn run_workflow(
         &config,
         root,
         provider,
+        auto_approve,
     )
     .await?;
     let (mut run_id, mut report) = apply_written_plan(root, objective, &plan, auto_approve)?;
@@ -105,6 +106,7 @@ pub async fn run_workflow(
                 &config,
                 root,
                 provider,
+                auto_approve,
             )
             .await?;
             // No-progress backstop: if the next step only re-proposes work already
@@ -178,6 +180,7 @@ async fn repair_to_pass(
             config,
             root,
             provider,
+            auto_approve,
         )
         .await?;
         let (rid, rep) = apply_written_plan(root, objective, &repair_plan, auto_approve)?;
@@ -406,7 +409,7 @@ fn apply_and_validate(
     // on an unverified change. Config commands are policy-filtered (silently
     // skipped if not allowed) since they are system-added, not model-requested.
     let commands = authoritative_commands(&real_root, &config, &plan.validation_commands, &engine);
-    let mut report = command_runner::run_all(&commands, real_root.clone(), &engine)?;
+    let mut report = command_runner::run_all(&commands, real_root.clone(), &engine, auto_approve)?;
 
     // Deterministic auto-heal: mechanical failures (formatting, autofixable
     // lints) are fixed by the trusted runtime — no model round-trip — then the
@@ -414,7 +417,7 @@ fn apply_and_validate(
     // suite is re-validated. This eliminates a whole class of repair iterations.
     if !report.passed && auto_heal(&real_root, &report) {
         rerecord_after(&real_root, &config, &run_id)?;
-        report = command_runner::run_all(&commands, real_root.clone(), &engine)?;
+        report = command_runner::run_all(&commands, real_root.clone(), &engine, auto_approve)?;
     }
 
     let run_dir = real_root.join(&config.runs.directory).join(&run_id);

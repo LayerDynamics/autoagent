@@ -87,6 +87,7 @@ pub async fn evolve_generated(
         &config,
         root,
         provider,
+        apply,
     )
     .await?;
     evolve_with_plan(root, objective, &plan, apply)

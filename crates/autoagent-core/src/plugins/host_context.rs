@@ -39,7 +39,8 @@ impl HostContext for CoreHost {
     }
 
     fn run_command(&mut self, command: &str) -> Result<String, String> {
-        let result = command_runner::run_one(command, self.root.clone(), &self.engine)
+        // Plugins are sandboxed: allow-listed commands only, never auto-approved.
+        let result = command_runner::run_one(command, self.root.clone(), &self.engine, false)
             .map_err(|e| e.to_string())?;
         if result.exit_code == Some(0) {
             Ok(result.stdout)

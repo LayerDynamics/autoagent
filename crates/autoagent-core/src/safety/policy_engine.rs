@@ -38,6 +38,21 @@ impl PolicyEngine {
     pub fn check_command(&self, command: &str) -> Result<Approved> {
         self.commands.check(command)
     }
+
+    /// Authorize a command for EXECUTION, given a runtime approval decision.
+    /// Allow-listed commands always pass; an unknown-but-clean command passes
+    /// only when `approved` (the user opted in via `--yes`/interactive approval/
+    /// autonomous mode) — this is how the agent pursues the tools it needs
+    /// (installers, linters, scripts, …). Hard-blocked commands (sudo, curl,
+    /// wget, ssh, rm -rf, chmod 777, …) and shell-metacharacter/`$()` syntax are
+    /// the absolute floor and are NEVER authorized, approval or not.
+    pub fn authorize_command(&self, command: &str, approved: bool) -> Result<()> {
+        match self.commands.check(command) {
+            Ok(_) => Ok(()),
+            Err(e) if e.error_code() == "policy.command_not_approved" && approved => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -59,6 +74,20 @@ mod tests {
     #[test]
     fn engine_allows_configured_command() {
         assert!(engine().check_command("cargo test").is_ok());
+    }
+
+    #[test]
+    fn authorize_command_gates_unknown_on_approval_but_blocks_floor() {
+        let e = engine();
+        // Allow-listed: always authorized.
+        assert!(e.authorize_command("cargo test", false).is_ok());
+        // Unknown but clean (e.g. a tool to install/use): needs approval.
+        assert!(e.authorize_command("npm install", false).is_err());
+        assert!(e.authorize_command("npm install", true).is_ok());
+        // Hard floor: blocked even WITH approval.
+        assert!(e.authorize_command("sudo rm -rf /", true).is_err());
+        assert!(e.authorize_command("curl http://x", true).is_err());
+        assert!(e.authorize_command("echo a && sudo b", true).is_err());
     }
 
     #[test]

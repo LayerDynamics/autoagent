@@ -69,6 +69,7 @@ pub fn dispatch(
     root: &Utf8Path,
     config: &AutoAgentConfig,
     engine: &PolicyEngine,
+    approved: bool,
 ) -> String {
     let redactor = Redactor::new(config.workspace.exclude.clone());
     let arg = |k: &str| -> String {
@@ -82,7 +83,7 @@ pub fn dispatch(
         "read_file" => read_file(root, &arg("path"), &redactor),
         "grep" => grep(root, &arg("pattern"), &redactor),
         "list_dir" => list_dir(root, &arg("path"), &redactor),
-        "run_command" => run_command(root, &arg("command"), engine),
+        "run_command" => run_command(root, &arg("command"), engine, approved),
         other => format!("error: unknown tool '{other}'"),
     }
 }
@@ -197,8 +198,11 @@ fn grep(root: &Utf8Path, pattern: &str, redactor: &Redactor) -> String {
     }
 }
 
-fn run_command(root: &Utf8Path, command: &str, engine: &PolicyEngine) -> String {
-    if let Err(e) = engine.check_command(command) {
+fn run_command(root: &Utf8Path, command: &str, engine: &PolicyEngine, approved: bool) -> String {
+    // Allow-listed commands always run; a clean unknown command (e.g. installing
+    // or invoking a tool the task needs) runs only when the run is approved;
+    // hard-blocked / unsafe commands never run.
+    if let Err(e) = engine.authorize_command(command, approved) {
         return format!("error: command not allowed by policy: {e}");
     }
     let parts: Vec<&str> = command.split_whitespace().collect();
@@ -265,6 +269,7 @@ mod tests {
             root,
             &cfg,
             &engine,
+            false,
         );
         assert!(ok.contains("pub fn alpha"));
 
@@ -274,6 +279,7 @@ mod tests {
             root,
             &cfg,
             &engine,
+            false,
         );
         assert!(
             secret.starts_with("error:"),
@@ -286,6 +292,7 @@ mod tests {
             root,
             &cfg,
             &engine,
+            false,
         );
         assert!(
             escape.starts_with("error:"),
@@ -304,6 +311,7 @@ mod tests {
             root,
             &cfg,
             &engine,
+            false,
         );
         assert!(g.contains("src/lib.rs:") && g.contains("fn beta"));
 
@@ -312,6 +320,7 @@ mod tests {
             root,
             &cfg,
             &engine,
+            false,
         );
         assert!(l.contains("lib.rs"));
     }
@@ -328,6 +337,7 @@ mod tests {
             root,
             &cfg,
             &engine,
+            false,
         );
         assert!(blocked.contains("not allowed by policy"), "got: {blocked}");
 
@@ -337,8 +347,23 @@ mod tests {
             root,
             &cfg,
             &engine,
+            false,
         );
         assert!(ok.contains("exit:"), "allowed command should run: {ok}");
+
+        // An unknown but clean command (a tool the task needs) is REFUSED without
+        // approval and RUNS with approval — this is how the agent pursues tools.
+        let needed = call("run_command", json!({"command": "echo aatool"}));
+        let refused = dispatch(&needed, root, &cfg, &engine, false);
+        assert!(
+            refused.contains("not allowed by policy"),
+            "unknown command must need approval: {refused}"
+        );
+        let approved = dispatch(&needed, root, &cfg, &engine, true);
+        assert!(
+            approved.contains("exit:") && approved.contains("aatool"),
+            "approved unknown command must run: {approved}"
+        );
     }
 
     #[test]
@@ -346,7 +371,7 @@ mod tests {
         let (dir, cfg) = fixture();
         let root = root_of(&dir);
         let engine = PolicyEngine::from_config(&cfg, root.to_path_buf());
-        let r = dispatch(&call("frobnicate", json!({})), root, &cfg, &engine);
+        let r = dispatch(&call("frobnicate", json!({})), root, &cfg, &engine, false);
         assert!(r.contains("unknown tool"));
     }
 }
