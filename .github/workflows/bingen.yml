@@ -176,7 +176,7 @@ jobs:
           maturin develop --release
           pytest -q
 
-  # Node SDK: `@autoagent/sdk` over the `@autoagent/native` N-API addon.
+  # Node SDK: `@autoagent-sdk/sdk` over the `@autoagent-sdk/native` N-API addon.
   sdk-node:
     name: sdk · node · ${{ matrix.os }}
     strategy:
@@ -191,7 +191,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "20"
-      - name: Build the native @autoagent/native addon (.node)
+      - name: Build the native @autoagent-sdk/native addon (.node)
         shell: bash
         run: |
           cargo build -p autoagent-bingen --features node-napi --release --lib

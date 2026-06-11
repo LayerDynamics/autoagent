@@ -1,5 +1,5 @@
 {
-  "name": "@autoagent/sdk",
+  "name": "@autoagent-sdk/sdk",
   "version": "0.0.1",
   "description": "Typed Node.js SDK for the AutoAgent policy-controlled mutation engine",
   "license": "MIT",
@@ -19,7 +19,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@autoagent/native": "file:../../crates/autoagent-bingen"
+    "@autoagent-sdk/native": "file:../../crates/autoagent-bingen"
   },
   "devDependencies": {
     "typescript": "^5"

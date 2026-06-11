@@ -132,7 +132,7 @@ Secondary users:
 |--------|--------|-------------|
 | Binding call overhead (non-mutating, e.g. `doctor`) | p95 added latency < **2 ms** over a direct in-process Rust call *(provisional)* | Criterion micro-bench: Rust direct vs napi/pyo3 call, same workspace |
 | Marshaling overhead for a typical `analyze` result (~100 files) | < **10 ms** to serialize+deserialize at the boundary *(provisional)* | Bench on a fixed fixture workspace |
-| Cold module load (native addon import) | < **150 ms** on a warm OS cache *(provisional)* | `require('@autoagent/native')` / `import autoagent` timed in CI |
+| Cold module load (native addon import) | < **150 ms** on a warm OS cache *(provisional)* | `require('@autoagent-sdk/native')` / `import autoagent` timed in CI |
 | Async call does not block the host event loop | 0 ms main-thread block during `run`/`evolve` | napi-rs `AsyncTask` / pyo3 `future_into_py`; verified by a concurrency test |
 
 #### Reliability
@@ -310,7 +310,7 @@ The **surface descriptor** is the one new data structure this crate owns. It is 
 **Bound surface (full CLI parity, FR-4).** Illustrative signatures (TypeScript / Python); exact arg objects are generated from the registry:
 
 ```typescript
-// @autoagent/native  (index.d.ts, generated)
+// @autoagent-sdk/native  (index.d.ts, generated)
 export function init(root: string, opts?: { yes?: boolean }): boolean;
 export function doctor(root: string): DoctorReport;
 export function analyze(root: string): ProjectAnalysis;
@@ -686,7 +686,7 @@ src/deno/deno_bindgen.rs      # deno_bindgen adapter   (generated)
 src/deno/ffi.rs               # raw C-ABI FFI adapter  (generated)
 dist/index.d.ts               # TS stubs (Node + Deno)
 dist/index.js                 # Node loader shim
-package.json                  # npm scaffold (@autoagent/native)
+package.json                  # npm scaffold (@autoagent-sdk/native)
 python/autoagent/__init__.pyi # PEP 561 stubs
 python/autoagent/__init__.py  # Python loader shim
 pyproject.toml                # maturin/abi3 scaffold

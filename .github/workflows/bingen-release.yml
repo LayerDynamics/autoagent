@@ -1,11 +1,11 @@
 name: bingen-release
 
 # Publishes the AutoAgent bindings + typed SDKs on a bingen tag:
-#   npm  → @autoagent/native (per-platform napi .node prebuilds)
-#        → @autoagent/sdk    (typed wrapper, depends on @autoagent/native)
-#   PyPI → autoagent-sdk     (the sdk/python mixed wheel: wrapper + _native)
-#   JSR  → @autoagent/native (Deno module)
-#        → @autoagent/sdk    (typed wrapper, depends on @autoagent/native)
+#   npm  → @autoagent-sdk/native (per-platform napi .node prebuilds)
+#        → @autoagent-sdk/sdk    (typed wrapper, depends on @autoagent-sdk/native)
+#   PyPI → autoagent-sdk         (the sdk/python mixed wheel: wrapper + _native)
+#   JSR  → @autoagent/native     (Deno module)
+#        → @autoagent/sdk        (typed wrapper, depends on @autoagent/native)
 # Native packages publish first; each SDK depends on its published native peer.
 on:
   push:
@@ -142,7 +142,7 @@ jobs:
   # workspace `file:`/relative references are rewritten to the published version.
   # ---------------------------------------------------------------------------
 
-  # @autoagent/sdk on npm, pinned to the just-published @autoagent/native.
+  # @autoagent-sdk/sdk on npm, pinned to the just-published @autoagent-sdk/native.
   npm-publish-sdk:
     needs: npm-publish
     runs-on: ubuntu-latest
@@ -152,14 +152,14 @@ jobs:
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
-      - name: Pin @autoagent/native, install, build
+      - name: Pin @autoagent-sdk/native, install, build
         working-directory: sdk/node
         run: |
           NATIVE_VER=$(node -p "require('../../crates/autoagent-bingen/package.json').version")
-          npm pkg set "dependencies.@autoagent/native=^$NATIVE_VER"
+          npm pkg set "dependencies.@autoagent-sdk/native=^$NATIVE_VER"
           npm install
           npm run build
-      - name: Publish @autoagent/sdk
+      - name: Publish @autoagent-sdk/sdk
         working-directory: sdk/node
         run: npm publish --access public
         env:

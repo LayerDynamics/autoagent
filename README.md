@@ -191,8 +191,8 @@ print(outcome.run_id, outcome.final_state)
 ```
 
 ```ts
-// Node/TypeScript — npm install @autoagent/sdk
-import { AutoAgent } from "@autoagent/sdk";
+// Node/TypeScript — npm install @autoagent-sdk/sdk
+import { AutoAgent } from "@autoagent-sdk/sdk";
 const aa = new AutoAgent("/path/to/repo");
 const outcome = await aa.run("add a healthcheck endpoint", null, true);
 ```

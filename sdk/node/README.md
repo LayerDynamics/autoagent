@@ -3,7 +3,7 @@
 Typed Node.js bindings for [AutoAgent](../../README.md) — a Rust-native local
 agent for safe, reversible, policy-controlled codebase mutation.
 
-`@autoagent/sdk` wraps the native N-API binding (`@autoagent/native`) with typed
+`@autoagent-sdk/sdk` wraps the native N-API binding (`@autoagent-sdk/native`) with typed
 models (`DoctorReport`, `RunOutcome`, `ProjectAnalysis`, …), an `AutoAgentError`
 class, and an `AutoAgent` client. Mutating operations are **fail-closed**: an
 unapproved op throws rather than touching the tree.
@@ -11,16 +11,16 @@ unapproved op throws rather than touching the tree.
 ## Install
 
 ```bash
-npm install @autoagent/sdk
+npm install @autoagent-sdk/sdk
 ```
 
-`@autoagent/native` (the compiled N-API addon) is a dependency and installs
+`@autoagent-sdk/native` (the compiled N-API addon) is a dependency and installs
 automatically. The SDK ships full TypeScript types.
 
 ## Quick start
 
 ```ts
-import { doctor, runSync, revert, version, AutoAgentError } from "@autoagent/sdk";
+import { doctor, runSync, revert, version, AutoAgentError } from "@autoagent-sdk/sdk";
 
 const root = "/path/to/your/repo";
 
@@ -42,7 +42,7 @@ revert(root, outcome.run_id);
 ### Client class
 
 ```ts
-import { AutoAgent } from "@autoagent/sdk";
+import { AutoAgent } from "@autoagent-sdk/sdk";
 
 const aa = new AutoAgent("/path/to/your/repo");
 aa.doctor();                       // -> DoctorReport
@@ -56,7 +56,7 @@ aa.revert(runId);
 `run` and `evolve` return promises (work runs off the main thread):
 
 ```ts
-import { AutoAgent } from "@autoagent/sdk";
+import { AutoAgent } from "@autoagent-sdk/sdk";
 
 const aa = new AutoAgent("/path/to/your/repo");
 const outcome = await aa.run("refactor the parser", null, true);
@@ -70,7 +70,7 @@ fail-closed: without the approval flag they throw `AutoAgentError` with a
 `policy.*` code.
 
 ```ts
-import { AutoAgent, AutoAgentError } from "@autoagent/sdk";
+import { AutoAgent, AutoAgentError } from "@autoagent-sdk/sdk";
 
 try {
   new AutoAgent(root).apply("plan.json"); // approve defaults to false
