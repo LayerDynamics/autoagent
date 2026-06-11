@@ -285,4 +285,76 @@ mod tests {
             Turn::ToolCalls(_) => panic!("expected a final answer"),
         }
     }
+
+    // --- robustness against malformed provider responses -------------------
+
+    #[tokio::test]
+    async fn complete_errors_on_missing_response_field() {
+        // A 200 that omits `response` is a clean Llm error, never a panic.
+        let (endpoint, handle) = serve_chat(r#"{"done":true}"#);
+        let err = LocalProvider::new(endpoint, "m".into())
+            .complete(&PlanRequest {
+                objective: "o".into(),
+                context: "c".into(),
+                format: None,
+            })
+            .await
+            .unwrap_err();
+        handle.join().unwrap();
+        assert_eq!(err.error_code(), "llm");
+        assert!(err.to_string().contains("missing 'response'"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn complete_errors_on_non_json_body() {
+        let (endpoint, handle) = serve_chat("not json at all");
+        let err = LocalProvider::new(endpoint, "m".into())
+            .complete(&PlanRequest {
+                objective: "o".into(),
+                context: "c".into(),
+                format: None,
+            })
+            .await
+            .unwrap_err();
+        handle.join().unwrap();
+        assert_eq!(err.error_code(), "llm");
+    }
+
+    #[tokio::test]
+    async fn converse_errors_on_missing_message() {
+        let (endpoint, handle) = serve_chat(r#"{"done":true}"#);
+        let err = LocalProvider::new(endpoint, "m".into())
+            .converse(
+                &[Message {
+                    role: "user".into(),
+                    content: "go".into(),
+                }],
+                &[],
+            )
+            .await
+            .unwrap_err();
+        handle.join().unwrap();
+        assert!(err.to_string().contains("missing 'message'"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn converse_empty_tool_calls_is_a_final_answer() {
+        // tool_calls present but empty -> a final answer, not a zero-call tool turn.
+        let (endpoint, handle) = serve_chat(r#"{"message":{"content":"DONE","tool_calls":[]}}"#);
+        let turn = LocalProvider::new(endpoint, "m".into())
+            .converse(
+                &[Message {
+                    role: "user".into(),
+                    content: "go".into(),
+                }],
+                &[],
+            )
+            .await
+            .unwrap();
+        handle.join().unwrap();
+        match turn {
+            Turn::Final(t) => assert_eq!(t, "DONE"),
+            Turn::ToolCalls(_) => panic!("empty tool_calls must not be a tool turn"),
+        }
+    }
 }
