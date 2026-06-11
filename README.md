@@ -183,7 +183,7 @@ AutoAgent's loops come in two complementary kinds:
 The same agent is available as a typed SDK in three languages, each wrapping the native engine:
 
 ```python
-# Python — pip install autoagent
+# Python — pip install autoagent-sdk
 from autoagent import AutoAgent
 aa = AutoAgent("/path/to/repo")
 outcome = aa.run_sync("add a healthcheck endpoint", approve=True)   # the agent writes + applies the code

@@ -112,7 +112,7 @@ Secondary users:
 | FR-10 | MUST | The pipeline MUST generate **package scaffolds**: `package.json` (napi triples + binary entry + loader), `pyproject.toml` (maturin/abi3), `deno.json` + the Deno `mod.ts` entry, and loader shims (`index.js`, `__init__.py`) that select the correct prebuilt binary per platform. |
 | FR-11 | MUST | The pipeline MUST emit a **machine-readable JSON Schema** of the bound surface (each command's name, args, return shape, privilege class) so external tools can codegen clients. |
 | FR-12 | SHOULD | `src/main.rs` SHOULD provide a `smoke` subcommand that loads each compiled backend and exercises a non-mutating call (`doctor`, `analyze`) to validate binding wiring in CI. |
-| FR-13 | MUST | Prebuilt artifacts MUST be published: an npm package (`@autoagent/native`) with per-platform `.node` prebuilds, PyPI abi3 wheels (`autoagent`), and a Deno/JSR module (`@autoagent/native`) that downloads/loads the matching `cdylib` — each with a source-build fallback. |
+| FR-13 | MUST | Prebuilt artifacts MUST be published: an npm package (`@autoagent/native`) with per-platform `.node` prebuilds, PyPI abi3 wheels (`autoagent-sdk`, import name `autoagent`), and a Deno/JSR module (`@autoagent/native`) that downloads/loads the matching `cdylib` — each with a source-build fallback. |
 | FR-14 | MUST | CI MUST build and test the artifact matrix across **linux, macOS, windows × x64, arm64** for all three ecosystems (Node, Python, Deno). |
 | FR-15 | SHOULD | The generator SHOULD enforce **surface/version parity**: a check that fails the build if `bind.rs` references a core symbol that no longer exists, or if the generated stubs are out of date relative to `bind.rs` (drift guard). |
 | FR-16 | SHOULD | The crate SHOULD expose a `version()` / `schemaVersion()` accessor returning core's `schema_version`, so host code can assert compatibility at load time. |
@@ -434,7 +434,7 @@ build.rs (feature=deno)      → compile cdylib → lib*.{so,dylib,dll} (Deno.dl
 - **`autoagent-core`** — the bound engine (sole inbound dependency, sole authority).
 - **`autoagent-plugin-sdk`** — transitive via core; the bound surface does not expose plugin internals beyond what core exposes.
 - **napi-rs / node-bindgen / pyo3 / rustpython / deno_bindgen / raw FFI** — the six backend mechanisms.
-- **npm registry** (`@autoagent/native`), **PyPI** (`autoagent`), and **JSR/deno.land** (`@autoagent/native`) — artifact distribution (FR-13).
+- **npm registry** (`@autoagent/native`), **PyPI** (`autoagent-sdk`), and **JSR/deno.land** (`@autoagent/native`) — artifact distribution (FR-13).
 - **CI (GitHub Actions)** — artifact matrix build/test/publish (FR-14), reusing SPEC-1's CI/release workflow conventions.
 - **`Autoagent.toml`** — read by bindings to construct the PolicyEngine (same config as CLI).
 
@@ -520,7 +520,7 @@ Mapping is generated from `bind.rs` so new core variants surface automatically (
 #### Phase 5: Distribution + CI Matrix (B5)
 - **Goal:** Prebuilt npm (`@autoagent/native`) + PyPI wheels + Deno/JSR module across linux/macos/windows × x64/arm64, with loader shims and source fallback.
 - **Scope:** package scaffolds generation (`package.json`, `pyproject.toml`, `deno.json`+`mod.ts`), CI matrix, publish workflow (npm/PyPI/JSR + `cdylib` release assets), checksums, drift guard in CI.
-- **Exit criteria:** `npm install @autoagent/native`, `pip install autoagent`, and `deno run` against `jsr:@autoagent/native` (from a test index) load and run `doctor` on all 6 target cells; `bingen check` gates the release.
+- **Exit criteria:** `npm install @autoagent/native`, `pip install autoagent-sdk`, and `deno run` against `jsr:@autoagent/native` (from a test index) load and run `doctor` on all 6 target cells; `bingen check` gates the release.
 
 ### 4.2 Testing Strategy
 

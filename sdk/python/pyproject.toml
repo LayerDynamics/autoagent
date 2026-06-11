@@ -3,7 +3,9 @@ requires = ["maturin>=1.5,<2"]
 build-backend = "maturin"
 
 [project]
-name = "autoagent"
+# Distribution name on PyPI (`autoagent` is taken by an unrelated project). The
+# import name stays `autoagent` — see `[tool.maturin] module-name` below.
+name = "autoagent-sdk"
 description = "Typed Python SDK for the AutoAgent policy-controlled mutation engine"
 requires-python = ">=3.9"
 license = { text = "MIT" }

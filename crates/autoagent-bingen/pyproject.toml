@@ -3,7 +3,9 @@ requires = ["maturin>=1.5,<2"]
 build-backend = "maturin"
 
 [project]
-name = "autoagent"
+# Local dev/test build only (never published — the published wheel is sdk/python).
+# Named to match the published distribution `autoagent-sdk`.
+name = "autoagent-sdk"
 description = "Python bindings for the AutoAgent policy-controlled mutation engine"
 requires-python = ">=3.9"
 license = { text = "MIT" }

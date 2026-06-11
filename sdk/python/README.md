@@ -12,8 +12,8 @@ apply.
 ## Install
 
 ```bash
-# from a published wheel
-pip install autoagent
+# from a published wheel (import name stays `autoagent`)
+pip install autoagent-sdk
 
 # from source (builds the bundled native extension)
 cd sdk/python

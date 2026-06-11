@@ -3,7 +3,7 @@ name: bingen-release
 # Publishes the AutoAgent bindings + typed SDKs on a bingen tag:
 #   npm  → @autoagent/native (per-platform napi .node prebuilds)
 #        → @autoagent/sdk    (typed wrapper, depends on @autoagent/native)
-#   PyPI → autoagent         (the sdk/python mixed wheel: wrapper + _native)
+#   PyPI → autoagent-sdk     (the sdk/python mixed wheel: wrapper + _native)
 #   JSR  → @autoagent/native (Deno module)
 #        → @autoagent/sdk    (typed wrapper, depends on @autoagent/native)
 # Native packages publish first; each SDK depends on its published native peer.
@@ -93,10 +93,11 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-  # Build + publish the `autoagent` PyPI package = the sdk/python mixed wheel
-  # (pure-Python typed wrapper bundling the pyo3 `_native` extension). The bare
-  # native crate's pyproject is for local dev/test only; the SDK wheel is the
-  # single published `autoagent` distribution. abi3 → one wheel per platform.
+  # Build + publish the `autoagent-sdk` PyPI package = the sdk/python mixed wheel
+  # (pure-Python typed wrapper bundling the pyo3 `_native` extension; the import
+  # name stays `autoagent`). The bare native crate's pyproject is local dev/test
+  # only; the SDK wheel is the single published `autoagent-sdk` distribution.
+  # abi3 → one wheel per platform.
   pypi:
     needs: gate
     strategy:
