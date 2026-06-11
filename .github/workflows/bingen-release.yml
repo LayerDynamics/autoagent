@@ -59,6 +59,13 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+      # The repo pins channel="1.96.0" via rust-toolchain.toml, so the active
+      # toolchain is NOT `stable`. dtolnay's `targets:` added the cross target to
+      # `stable`; we must add it to the *pinned* toolchain too. Running from the
+      # checkout (default cwd) lets the rust-toolchain.toml override take effect,
+      # so this lands on 1.96.0. No-op on native-arch legs.
+      - name: Add Rust target for the pinned toolchain
+        run: rustup target add ${{ matrix.target }}
       - name: Build napi cdylib
         run: cargo build -p autoagent-bingen --features node-napi --release --lib --target ${{ matrix.target }}
       - name: Rename to platform .node
@@ -91,7 +98,13 @@ jobs:
           find artifacts -name '*.node' -exec cp {} crates/autoagent-bingen/dist/ \;
       - name: Publish to npm
         working-directory: crates/autoagent-bingen
-        run: npm publish --access public
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          if npm view "@autoagent-sdk/native@$VER" version >/dev/null 2>&1; then
+            echo "@autoagent-sdk/native@$VER already published — skipping"
+          else
+            npm publish --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -105,7 +118,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, macos-13, windows-latest]
+        # macos-13 (Intel) dropped: the runner pool is deprecated/starved and
+        # stalled the release for hours. Intel-mac wheel coverage is a known gap
+        # to revisit once the PyPI trusted publisher is configured.
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     permissions:
       id-token: write
@@ -137,7 +153,13 @@ jobs:
           deno-version: v2.x
       - name: Publish to JSR
         working-directory: crates/autoagent-bingen
-        run: deno publish --token "${{ secrets.JSR_TOKEN }}"
+        run: |
+          VER=$(deno eval "console.log(JSON.parse(Deno.readTextFileSync('deno.json')).version)")
+          if curl -sf "https://jsr.io/@layerdynamics/autoagent-native/${VER}_meta.json" >/dev/null; then
+            echo "@layerdynamics/autoagent-native@$VER already published — skipping"
+          else
+            deno publish --token "${{ secrets.JSR_TOKEN }}"
+          fi
 
   # ---------------------------------------------------------------------------
   # SDK packages — each depends on its native peer being published first, so the
@@ -163,7 +185,13 @@ jobs:
           npm run build
       - name: Publish @autoagent-sdk/sdk
         working-directory: sdk/node
-        run: npm publish --access public
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          if npm view "@autoagent-sdk/sdk@$VER" version >/dev/null 2>&1; then
+            echo "@autoagent-sdk/sdk@$VER already published — skipping"
+          else
+            npm publish --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -185,4 +213,10 @@ jobs:
           sed -i "s|../../crates/autoagent-bingen/deno/mod.ts|jsr:@layerdynamics/autoagent-native@^$NATIVE_VER|g" mod.ts client.ts errors.ts
       - name: Publish @layerdynamics/autoagent-sdk to JSR
         working-directory: sdk/deno
-        run: deno publish --allow-dirty --token "${{ secrets.JSR_TOKEN }}"
+        run: |
+          VER=$(deno eval "console.log(JSON.parse(Deno.readTextFileSync('deno.json')).version)")
+          if curl -sf "https://jsr.io/@layerdynamics/autoagent-sdk/${VER}_meta.json" >/dev/null; then
+            echo "@layerdynamics/autoagent-sdk@$VER already published — skipping"
+          else
+            deno publish --allow-dirty --token "${{ secrets.JSR_TOKEN }}"
+          fi
