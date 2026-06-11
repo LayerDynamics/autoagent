@@ -67,17 +67,30 @@ reliable local option if you have the VRAM. The model must expose Ollama's
 `/api/generate` (its capabilities include `completion`) — some chat-only models do
 not. To check: `curl -s localhost:11434/api/show -d '{"model":"<name>"}' | grep completion`.
 
+**Other local backends** — **LM Studio** and a self-hosted **HuggingFace TGI** server both speak OpenAI's `/v1/chat/completions` API, so they run on-machine with no egress and, for tool-capable models, get the full agentic loop:
+
+```toml
+[llm]
+provider = "lmstudio"                # LM Studio's local server
+model = "qwen2.5-coder"
+endpoint = "http://localhost:1234/v1"
+code_egress_opt_in = false
+
+# provider = "huggingface-local"     # a self-hosted HuggingFace TGI server
+# endpoint = "http://localhost:8080/v1"
+```
+
 To use a cloud model, you must **explicitly opt in** (this acknowledges that source code leaves the machine) and provide the key via the environment — never in config:
 
 ```toml
 [llm]
-provider = "anthropic"             # or "openai"
+provider = "anthropic"             # or "openai", or "huggingface" (hosted Inference API)
 model = "claude-opus-4-8"
 code_egress_opt_in = true          # required for any cloud provider
 ```
 
 ```bash
-export ANTHROPIC_API_KEY=...       # or OPENAI_API_KEY for the openai provider
+export ANTHROPIC_API_KEY=...       # OPENAI_API_KEY for openai, HF_TOKEN for huggingface
 autoagent run "refactor the parser into its own module"
 ```
 
