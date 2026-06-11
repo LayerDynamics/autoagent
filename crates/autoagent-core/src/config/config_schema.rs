@@ -21,7 +21,9 @@ pub struct AutoAgentConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
-    /// "local" | "anthropic" | "openai"
+    /// Local (no egress): "local" (Ollama), "lmstudio", "huggingface-local"
+    /// (a self-hosted OpenAI-compatible TGI server). Cloud (egress opt-in +
+    /// env key): "anthropic", "openai", "huggingface" (hosted Inference API).
     pub provider: String,
     pub model: String,
     #[serde(default)]

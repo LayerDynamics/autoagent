@@ -95,6 +95,24 @@ create_before_write = true
 
 [runs]
 directory = ".agent/runs"
+
+# [llm] is optional. Omitted, AutoAgent uses a local Ollama server — no code
+# egress. Uncomment and set `provider` to choose another backend:
+#
+# Local (on-machine, no code leaves the host):
+#   provider = "local"             # Ollama          (default; http://localhost:11434)
+#   provider = "lmstudio"          # LM Studio        (http://localhost:1234/v1)
+#   provider = "huggingface-local" # self-hosted TGI  (http://localhost:8080/v1)
+# Cloud (requires code_egress_opt_in = true + an API key from the environment):
+#   provider = "openai"            # OPENAI_API_KEY
+#   provider = "anthropic"         # ANTHROPIC_API_KEY
+#   provider = "huggingface"       # HF_TOKEN  (hosted Inference API)
+#
+# [llm]
+# provider = "lmstudio"
+# model = "qwen2.5-coder"
+# endpoint = "http://localhost:1234/v1"   # override the default for your server
+# code_egress_opt_in = false              # must be true for cloud providers
 "#
     .to_string()
 }
