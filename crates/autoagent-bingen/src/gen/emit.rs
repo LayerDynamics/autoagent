@@ -181,7 +181,7 @@ fn package_json() -> String {
 fn deno_json() -> String {
     format!(
         r#"{{
-  "name": "@autoagent/native",
+  "name": "@layerdynamics/autoagent-native",
   "version": "{PKG_VERSION}",
   "license": "MIT",
   "exports": "./deno/mod.ts",
@@ -1030,7 +1030,7 @@ fn deno_sdk_mod() -> String {
     out.push_str(
         r#"// AutoAgent — typed Deno SDK over the native FFI binding.
 //
-// The native binding (`@autoagent/native`) already returns typed models and
+// The native binding (`@layerdynamics/autoagent-native`) already returns typed models and
 // throws `AutoAgentError`; this module re-exports that functional API with the
 // SDK's models + error type and adds the `AutoAgent` client class. Requires
 // --allow-ffi (and --allow-read/--allow-write for mutating ops); set

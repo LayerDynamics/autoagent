@@ -3,7 +3,7 @@
 Typed Deno bindings for [AutoAgent](../../README.md) — a Rust-native local agent
 for safe, reversible, policy-controlled codebase mutation.
 
-`@autoagent/sdk` wraps the native FFI binding with typed models
+`@layerdynamics/autoagent-sdk` wraps the native FFI binding with typed models
 (`DoctorReport`, `RunOutcome`, `ProjectAnalysis`, …), an `AutoAgentError` class,
 and an `AutoAgent` client. Mutating operations are **fail-closed**: an
 unapproved op throws rather than touching the tree.
@@ -11,7 +11,7 @@ unapproved op throws rather than touching the tree.
 ## Install
 
 ```ts
-import { AutoAgent, doctor } from "jsr:@autoagent/sdk";
+import { AutoAgent, doctor } from "jsr:@layerdynamics/autoagent-sdk";
 ```
 
 The binding loads a compiled cdylib via Deno FFI. Build it once and point
@@ -28,7 +28,7 @@ FFI requires explicit permissions: `--allow-ffi --allow-read --allow-write --all
 
 ```ts
 // run: deno run --allow-ffi --allow-read --allow-write --allow-env example.ts
-import { doctor, runSync, revert, version } from "jsr:@autoagent/sdk";
+import { doctor, runSync, revert, version } from "jsr:@layerdynamics/autoagent-sdk";
 
 const root = "/path/to/your/repo";
 
@@ -50,7 +50,7 @@ revert(root, outcome.run_id);
 ### Client class
 
 ```ts
-import { AutoAgent } from "jsr:@autoagent/sdk";
+import { AutoAgent } from "jsr:@layerdynamics/autoagent-sdk";
 
 const aa = new AutoAgent("/path/to/your/repo");
 aa.doctor();                       // -> DoctorReport
@@ -68,7 +68,7 @@ Mutating operations (`apply`, `runSync`, `evolveSync`) are fail-closed: without
 the approval flag they throw `AutoAgentError` with a `policy.*` code.
 
 ```ts
-import { AutoAgent, AutoAgentError } from "jsr:@autoagent/sdk";
+import { AutoAgent, AutoAgentError } from "jsr:@layerdynamics/autoagent-sdk";
 
 try {
   new AutoAgent(root).apply("plan.json"); // approve defaults to false

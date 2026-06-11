@@ -141,10 +141,10 @@ fn models_schema_emitted() {
 #[test]
 fn package_scaffolds_emitted() {
     let out = gen::render_all();
-    // npm package is scoped to the available @autoagent-sdk org; JSR keeps @autoagent.
+    // npm uses the @autoagent-sdk org; JSR uses the @layerdynamics scope.
     assert!(out["package.json"].contains("@autoagent-sdk/native"));
     assert!(out["package.json"].contains("\"binaryName\": \"autoagent\""));
-    assert!(out["deno.json"].contains("@autoagent/native"));
+    assert!(out["deno.json"].contains("@layerdynamics/autoagent-native"));
     assert!(out["deno.json"].contains("./deno/mod.ts"));
     assert!(out["dist/index.js"].contains("autoagent.${triple()}.node"));
 }

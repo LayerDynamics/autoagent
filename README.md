@@ -198,7 +198,7 @@ const outcome = await aa.run("add a healthcheck endpoint", null, true);
 ```
 
 ```ts
-// Deno — import { AutoAgent } from "jsr:@autoagent/sdk";
+// Deno — import { AutoAgent } from "jsr:@layerdynamics/autoagent-sdk";
 const aa = new AutoAgent("/path/to/repo");
 const outcome = aa.runSync("add a healthcheck endpoint", null, true);
 ```

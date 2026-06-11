@@ -4,8 +4,8 @@ name: bingen-release
 #   npm  → @autoagent-sdk/native (per-platform napi .node prebuilds)
 #        → @autoagent-sdk/sdk    (typed wrapper, depends on @autoagent-sdk/native)
 #   PyPI → autoagent-sdk         (the sdk/python mixed wheel: wrapper + _native)
-#   JSR  → @autoagent/native     (Deno module)
-#        → @autoagent/sdk        (typed wrapper, depends on @autoagent/native)
+#   JSR  → @layerdynamics/autoagent-native (Deno module)
+#        → @layerdynamics/autoagent-sdk    (typed wrapper, depends on @layerdynamics/autoagent-native)
 # Native packages publish first; each SDK depends on its published native peer.
 on:
   push:
@@ -135,7 +135,7 @@ jobs:
           deno-version: v2.x
       - name: Publish to JSR
         working-directory: crates/autoagent-bingen
-        run: deno publish
+        run: deno publish --token "${{ secrets.JSR_TOKEN }}"
 
   # ---------------------------------------------------------------------------
   # SDK packages — each depends on its native peer being published first, so the
@@ -165,7 +165,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-  # @autoagent/sdk on JSR, with the relative native import rewritten to jsr:.
+  # @layerdynamics/autoagent-sdk on JSR, native import rewritten to jsr:.
   jsr-sdk:
     needs: jsr
     runs-on: ubuntu-latest
@@ -180,7 +180,7 @@ jobs:
         working-directory: sdk/deno
         run: |
           NATIVE_VER=$(deno eval "console.log(JSON.parse(Deno.readTextFileSync('../../crates/autoagent-bingen/deno.json')).version)")
-          sed -i "s|../../crates/autoagent-bingen/deno/mod.ts|jsr:@autoagent/native@^$NATIVE_VER|g" mod.ts client.ts errors.ts
-      - name: Publish @autoagent/sdk to JSR
+          sed -i "s|../../crates/autoagent-bingen/deno/mod.ts|jsr:@layerdynamics/autoagent-native@^$NATIVE_VER|g" mod.ts client.ts errors.ts
+      - name: Publish @layerdynamics/autoagent-sdk to JSR
         working-directory: sdk/deno
-        run: deno publish --allow-dirty
+        run: deno publish --allow-dirty --token "${{ secrets.JSR_TOKEN }}"

@@ -1,5 +1,5 @@
 {
-  "name": "@autoagent/native",
+  "name": "@layerdynamics/autoagent-native",
   "version": "0.0.1",
   "license": "MIT",
   "exports": "./deno/mod.ts",
