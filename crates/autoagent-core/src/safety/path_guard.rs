@@ -328,6 +328,37 @@ mod tests {
         assert_eq!(ok, Utf8PathBuf::from("/ws/crates/x"));
     }
 
+    #[test]
+    fn canonicalize_existing_resolves_to_an_absolute_plain_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = Utf8Path::from_path(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join("sub").as_std_path()).unwrap();
+        let resolved =
+            canonicalize_existing(&root.join("sub")).expect("an existing dir must resolve");
+        assert!(resolved.is_absolute());
+        // Never hand back a Windows verbatim path — that re-breaks `/`-joins.
+        assert!(
+            !resolved.as_str().starts_with(r"\\?\"),
+            "must be de-verbatimed: {resolved}"
+        );
+        assert!(resolved.ends_with("sub"));
+    }
+
+    #[test]
+    fn canonicalize_existing_is_none_for_a_missing_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = Utf8Path::from_path(dir.path()).unwrap();
+        assert!(canonicalize_existing(&root.join("nope")).is_none());
+    }
+
+    #[test]
+    fn canonical_root_falls_back_to_the_input_when_off_disk() {
+        // Not on disk → the (de-verbatimed) input is returned, never verbatim.
+        let p = canonical_root(Utf8Path::new("/definitely/not/here"));
+        assert!(!p.as_str().starts_with(r"\\?\"));
+        assert_eq!(p, Utf8PathBuf::from("/definitely/not/here"));
+    }
+
     proptest! {
         // The real safety invariant: any path the guard ALLOWS for Write is
         // inside root, under an allowed prefix, and not blocked.

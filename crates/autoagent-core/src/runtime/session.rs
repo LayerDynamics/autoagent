@@ -201,4 +201,52 @@ mod tests {
             "// b\n"
         );
     }
+
+    #[test]
+    fn replay_reproduces_identical_content_on_a_fresh_tree() {
+        // The headline guarantee: replaying the recorded session onto a clean
+        // workspace reproduces the exact recorded bytes — deterministically.
+        let (dir, cfg) = workspace();
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        let id = record(
+            root,
+            &cfg,
+            "one file",
+            &[create_plan("crates/a.rs", "// a\n")],
+        )
+        .unwrap();
+
+        replay(root, &id).unwrap();
+        let first = std::fs::read_to_string(root.join("crates/a.rs")).unwrap();
+        // Reset to a fresh tree and replay again: byte-identical result.
+        std::fs::remove_file(root.join("crates/a.rs").as_std_path()).unwrap();
+        replay(root, &id).unwrap();
+        let second = std::fs::read_to_string(root.join("crates/a.rs")).unwrap();
+        assert_eq!(first, "// a\n");
+        assert_eq!(first, second, "replay must be deterministic across runs");
+    }
+
+    #[test]
+    fn replay_of_empty_session_is_an_error() {
+        // A session with no recorded steps has nothing to reproduce.
+        let (dir, cfg) = workspace();
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        let id = record(root, &cfg, "nothing", &[]).unwrap();
+        assert_eq!(load(root, &id).unwrap().steps, 0);
+        assert!(replay(root, &id).is_err(), "0-step replay must error");
+    }
+
+    #[test]
+    fn replay_of_unknown_session_is_an_error() {
+        let (dir, _cfg) = workspace();
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        assert!(replay(root, "20990101T000000Z-nope").is_err());
+    }
+
+    #[test]
+    fn load_of_missing_session_is_an_error() {
+        let (dir, _cfg) = workspace();
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        assert!(load(root, "does-not-exist").is_err());
+    }
 }
