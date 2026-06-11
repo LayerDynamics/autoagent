@@ -87,4 +87,40 @@ mod tests {
         assert!(r.is_excluded(".env.local"));
         assert!(r.is_excluded("id_rsa"));
     }
+
+    #[test]
+    fn scrubs_colon_delimiter_and_every_secret_keyword() {
+        let r = Redactor::new(vec![]);
+        // JSON-style `:` delimiter is redacted, not just `=`.
+        let json = r.scrub("\"token\": \"abc123\"");
+        assert!(
+            !json.contains("abc123"),
+            "colon-delimited secret leaked: {json}"
+        );
+        // Each recognized keyword triggers redaction.
+        for kw in ["api_key", "apikey", "secret", "token", "password"] {
+            let line = format!("{kw} = topsecretvalue");
+            assert!(
+                !r.scrub(&line).contains("topsecretvalue"),
+                "keyword `{kw}` did not redact"
+            );
+        }
+    }
+
+    #[test]
+    fn keyword_match_is_case_insensitive() {
+        let r = Redactor::new(vec![]);
+        assert!(!r.scrub("PASSWORD=hunter2").contains("hunter2"));
+        assert!(!r.scrub("ApiKey: zzz").contains("zzz"));
+    }
+
+    #[test]
+    fn secret_keyword_without_a_delimiter_is_left_intact() {
+        // Pins the M3 first-cut behavior (OQ-4): redaction keys off `=`/`:`, so a
+        // secret mentioned in prose without a delimiter is NOT scrubbed. This
+        // documents the current limit and guards against silent behavior change.
+        let r = Redactor::new(vec![]);
+        let line = "the password is hunter2";
+        assert_eq!(r.scrub(line), line);
+    }
 }

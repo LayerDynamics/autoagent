@@ -195,4 +195,93 @@ mod tests {
             "x\nx\n"
         );
     }
+
+    #[test]
+    fn content_ops_without_content_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        let ed = FileEditor::new(root.to_path_buf());
+        // Create/Write/Replace/Append all require `content`; a malformed op must
+        // error cleanly and write nothing — never panic or truncate.
+        for kind in [
+            FileOperationKind::Create,
+            FileOperationKind::Write,
+            FileOperationKind::Replace,
+            FileOperationKind::Append,
+        ] {
+            let label = format!("{kind:?}");
+            assert!(ed.apply(&op(kind, "a.txt", None)).is_err(), "{label}");
+        }
+        assert!(!root.join("a.txt").as_std_path().exists());
+    }
+
+    #[test]
+    fn append_creates_the_file_when_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        let ed = FileEditor::new(root.to_path_buf());
+        // Append to a not-yet-existing file creates it (OpenOptions::create(true)).
+        ed.apply(&op(FileOperationKind::Append, "new.txt", Some("hello")))
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("new.txt")).unwrap(),
+            "hello"
+        );
+    }
+
+    #[test]
+    fn rename_without_destination_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        let ed = FileEditor::new(root.to_path_buf());
+        ed.apply(&op(FileOperationKind::Create, "a.txt", Some("v")))
+            .unwrap();
+        // `op()` leaves destination_path None.
+        assert!(ed
+            .apply(&op(FileOperationKind::Rename, "a.txt", None))
+            .is_err());
+        assert!(
+            root.join("a.txt").as_std_path().exists(),
+            "source preserved"
+        );
+    }
+
+    #[test]
+    fn substitute_without_anchor_field_or_content_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        let ed = FileEditor::new(root.to_path_buf());
+        ed.apply(&op(
+            FileOperationKind::Create,
+            "f.rs",
+            Some("anchor here\n"),
+        ))
+        .unwrap();
+
+        // Anchor field absent (None) -> error.
+        assert!(ed
+            .apply(&op(FileOperationKind::Substitute, "f.rs", Some("x")))
+            .is_err());
+
+        // Anchor present but no replacement content -> error.
+        let mut no_content = op(FileOperationKind::Substitute, "f.rs", None);
+        no_content.anchor = Some("anchor here".into());
+        assert!(ed.apply(&no_content).is_err());
+
+        // The target is untouched after either refusal.
+        assert_eq!(
+            std::fs::read_to_string(root.join("f.rs")).unwrap(),
+            "anchor here\n"
+        );
+    }
+
+    #[test]
+    fn create_directory_makes_nested_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap();
+        let ed = FileEditor::new(root.to_path_buf());
+        ed.apply(&op(FileOperationKind::CreateDirectory, "a/b/c", None))
+            .unwrap();
+        assert!(root.join("a/b/c").as_std_path().is_dir());
+    }
 }
