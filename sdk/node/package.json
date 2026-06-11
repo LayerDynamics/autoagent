@@ -27,6 +27,6 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/client.test.mjs test/functional.test.mjs"
+    "test": "node --test test/client.test.mjs test/functional.test.mjs test/replay.test.mjs"
   }
 }
