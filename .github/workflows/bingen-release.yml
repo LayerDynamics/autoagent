@@ -38,7 +38,9 @@ jobs:
             target: aarch64-apple-darwin
             triple: darwin-arm64
             ext: dylib
-          - os: macos-13
+          # Intel-mac .node is cross-compiled on the arm64 runner — the macos-13
+          # (Intel) runner pool is deprecated/starved and stalls the whole release.
+          - os: macos-latest
             target: x86_64-apple-darwin
             triple: darwin-x64
             ext: dylib
